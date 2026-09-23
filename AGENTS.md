@@ -18,7 +18,10 @@ Self-hosted Todoist clone (MVP). A fast, hierarchical task manager with drag-and
 - **Frontend:** React, Vite, TanStack Query (for server state & Optimistic UI), @dnd-kit (for tree drag-and-drop), Tailwind CSS.
 - **Backend:** Hono (functional routing), Drizzle ORM (functional SQL builder, no Active Record), Zod (validation).
 - **Database:** PostgreSQL.
-- **Testing:** Vitest (Unit & API), Playwright (E2E). No class mocking.
+- **Testing:** 
+  - Domain & Backend API: Vitest + Supertest. No class mocking.
+  - Frontend UI: Vitest + React Testing Library (for basic component functionality).
+  - E2E: Playwright.
 
 ## MVP Scope Constraints
 - **Do NOT implement:** Authentication/users, recurring tasks, smart date NLP parsing, tags, collaboration features, activity logs.
@@ -28,4 +31,5 @@ Self-hosted Todoist clone (MVP). A fast, hierarchical task manager with drag-and
 ## Code Style
 - Extract business logic (like tree building and lexical sorting) into pure functions inside `/packages/domain` so they can be unit-tested without DB or Framework context.
 - UI state management relies heavily on React Query's `onMutate` for Optimistic Updates.
-- E2E tests in Playwright must use functional helpers (closures), not Page Object Model classes.
+- Frontend basic functionality (rendering, state updates, event dispatching) MUST be verified via Unit Tests before moving to E2E.
+- E2E tests in Playwright must use functional helpers (closures), not Page Object Model classes. E2E testing is a mandatory part of the MVP.
