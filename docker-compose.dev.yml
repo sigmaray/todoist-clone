@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-todoist}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-todoist}
+      POSTGRES_DB: ${POSTGRES_DB:-todoist}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  dev:
+    image: node:22-bookworm-slim
+    working_dir: /workspace
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://${POSTGRES_USER:-todoist}:${POSTGRES_PASSWORD:-todoist}@postgres:5432/${POSTGRES_DB:-todoist}
+    ports:
+      - "3000:3000"
+      - "5173:5173"
+    volumes:
+      - .:/workspace
+      - pnpm-store:/pnpm/store
+      - root-node-modules:/workspace/node_modules
+      - backend-node-modules:/workspace/apps/backend/node_modules
+      - frontend-node-modules:/workspace/apps/frontend/node_modules
+      - domain-node-modules:/workspace/packages/domain/node_modules
+    command:
+      - bash
+      - -lc
+      - |
+        corepack enable
+        corepack prepare pnpm@11.20.0 --activate
+        pnpm config set store-dir /pnpm/store
+        pnpm install --frozen-lockfile
+        pnpm --filter @todoist-clonse/backend exec drizzle-kit migrate --config drizzle.config.ts
+        pnpm --filter @todoist-clonse/backend dev &
+        pnpm --filter @todoist-clonse/frontend dev --host 0.0.0.0
+
+volumes:
+  postgres-data:
+  pnpm-store:
+  root-node-modules:
+  backend-node-modules:
+  frontend-node-modules:
+  domain-node-modules:

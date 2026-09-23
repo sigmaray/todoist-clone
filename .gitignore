@@ -1,2 +1,10 @@
 aiignore/
 gitignore/
+.env
+node_modules/
+dist/
+*.tsbuildinfo
+test-results/
+playwright-report/
+.pnpm-cache/
+.pnpm-data/

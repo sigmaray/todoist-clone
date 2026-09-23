@@ -1,0 +1,51 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-todoist}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-todoist}
+      POSTGRES_DB: ${POSTGRES_DB:-todoist}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    tmpfs:
+      - /var/lib/postgresql/data
+
+  tests:
+    image: mcr.microsoft.com/playwright:v1.63.0-noble
+    working_dir: /workspace
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      CI: "true"
+      NODE_ENV: test
+      DATABASE_URL: postgres://${POSTGRES_USER:-todoist}:${POSTGRES_PASSWORD:-todoist}@postgres:5432/${POSTGRES_DB:-todoist}
+      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+    volumes:
+      - .:/workspace
+      - pnpm-store:/pnpm/store
+      - root-node-modules:/workspace/node_modules
+      - backend-node-modules:/workspace/apps/backend/node_modules
+      - frontend-node-modules:/workspace/apps/frontend/node_modules
+      - domain-node-modules:/workspace/packages/domain/node_modules
+    command:
+      - bash
+      - -lc
+      - |
+        corepack enable
+        corepack prepare pnpm@11.20.0 --activate
+        pnpm config set store-dir /pnpm/store
+        pnpm install --frozen-lockfile
+        pnpm test
+        pnpm --filter @todoist-clonse/backend exec drizzle-kit migrate --config drizzle.config.ts
+        pnpm test:e2e
+
+volumes:
+  pnpm-store:
+  root-node-modules:
+  backend-node-modules:
+  frontend-node-modules:
+  domain-node-modules:

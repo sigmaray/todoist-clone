@@ -1,0 +1,64 @@
+version: "3"
+
+vars:
+  DB_HOST: '{{.DB_HOST | default "127.0.0.1"}}'
+  DB_PORT: '{{.DB_PORT | default "5432"}}'
+  DB_USER: '{{.DB_USER | default "todoist"}}'
+  DB_PASSWORD: '{{.DB_PASSWORD | default "todoist"}}'
+  DB_NAME: '{{.DB_NAME | default "todoist"}}'
+  DATABASE_URL: '{{.DATABASE_URL | default "postgres://todoist:todoist@127.0.0.1:5432/todoist"}}'
+
+tasks:
+  backend:
+    desc: Run the backend API in watch mode
+    cmds:
+      - pnpm dev:backend
+
+  frontend:
+    desc: Run the frontend Vite dev server
+    cmds:
+      - pnpm dev:frontend
+
+  dev:docker:
+    desc: Run the full development environment through Docker Compose
+    cmds:
+      - docker compose --env-file .env.example -f docker-compose.dev.yml up
+
+  test:
+    desc: Run unit, integration, UI, and E2E tests
+    cmds:
+      - pnpm test
+      - pnpm test:e2e
+
+  test:unit:
+    desc: Run domain, backend, and frontend tests without Playwright
+    cmds:
+      - pnpm test
+
+  test:docker:
+    desc: Run all tests through Docker Compose
+    cmds:
+      - |
+        status=0
+        docker compose --env-file .env.example -f docker-compose.test.yml up --abort-on-container-exit --exit-code-from tests tests || status=$?
+        docker compose --env-file .env.example -f docker-compose.test.yml down -v --remove-orphans
+        exit $status
+
+  db:create:
+    desc: Create the PostgreSQL database if it does not exist
+    cmds:
+      - |
+        PGPASSWORD="{{.DB_PASSWORD}}" psql -h "{{.DB_HOST}}" -p "{{.DB_PORT}}" -U "{{.DB_USER}}" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '{{.DB_NAME}}'" | grep -q 1 \
+          || PGPASSWORD="{{.DB_PASSWORD}}" createdb -h "{{.DB_HOST}}" -p "{{.DB_PORT}}" -U "{{.DB_USER}}" "{{.DB_NAME}}"
+
+  db:drop-tables:
+    desc: Drop all tables in the PostgreSQL database
+    cmds:
+      - |
+        PGPASSWORD="{{.DB_PASSWORD}}" psql -h "{{.DB_HOST}}" -p "{{.DB_PORT}}" -U "{{.DB_USER}}" -d "{{.DB_NAME}}" -v ON_ERROR_STOP=1 -c 'DO $$ DECLARE item RECORD; BEGIN FOR item IN (SELECT tablename FROM pg_tables WHERE schemaname = current_schema()) LOOP EXECUTE format(''DROP TABLE IF EXISTS %I CASCADE'', item.tablename); END LOOP; END $$;'
+
+  db:migrate:
+    desc: Run Drizzle migrations for the PostgreSQL database
+    dir: apps/backend
+    cmds:
+      - DATABASE_URL="{{.DATABASE_URL}}" pnpm exec drizzle-kit migrate --config drizzle.config.ts
