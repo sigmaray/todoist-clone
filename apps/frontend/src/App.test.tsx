@@ -67,10 +67,20 @@ const baseApi = (tasks: ReadonlyArray<TaskNode>): TaskApi =>
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z"
       }),
-    createTask: async (title): Promise<Task> => task({ id: "created", title }),
+    updateSection: async (id, title) =>
+      Object.freeze({
+        id,
+        title,
+        projectId: null,
+        lexicalOrder: "U",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z"
+      }),
+    deleteSection: async () => undefined,
+    createTask: async (title, projectId, sectionId, parentId): Promise<Task> => task({ id: "created", title, projectId, sectionId, parentId }),
     patchTask: async (id, completed): Promise<Task> => task({ id, title: "Plan MVP", completed }),
     updateTaskTitle: async (id, title): Promise<Task> => task({ id, title }),
-    moveTask: async (id, projectId, sectionId): Promise<Task> => task({ id, title: "Moved", projectId, sectionId }),
+    moveTask: async (id, projectId, sectionId, parentId): Promise<Task> => task({ id, title: "Moved", projectId, sectionId, parentId }),
     deleteTask: async () => undefined
   });
 
@@ -116,12 +126,14 @@ describe("TaskApp", () => {
     await userEvent.type(screen.getByLabelText(/Task title/), "Write tests");
     await userEvent.click(screen.getByRole("button", { name: "Add task" }));
 
-    await waitFor(() => expect(createTask).toHaveBeenCalledWith("Write tests", null, null));
+    await waitFor(() => expect(createTask).toHaveBeenCalledWith("Write tests", null, null, null));
   });
 
   it("creates projects and sends new tasks to the selected project", async () => {
     let projects = Object.freeze([] as ReadonlyArray<Project>);
-    const createTask = vi.fn(async (title: string, projectId: string | null): Promise<Task> => task({ id: "created", title, projectId }));
+    const createTask = vi.fn(async (title: string, projectId: string | null, sectionId: string | null, parentId: string | null): Promise<Task> =>
+      task({ id: "created", title, projectId, sectionId, parentId })
+    );
     const createProject = vi.fn(async (title: string): Promise<Project> => {
       const created = project({ id: "project-1", title });
       projects = Object.freeze([...projects, created]);
@@ -144,7 +156,28 @@ describe("TaskApp", () => {
     await userEvent.type(screen.getByLabelText(/Task title/), "Define milestones");
     await userEvent.click(screen.getByRole("button", { name: "Add task" }));
 
-    await waitFor(() => expect(createTask).toHaveBeenCalledWith("Define milestones", "project-1", null));
+    await waitFor(() => expect(createTask).toHaveBeenCalledWith("Define milestones", "project-1", null, null));
+  });
+
+  it("creates subtasks under an existing task", async () => {
+    const createTask = vi.fn(
+      async (title: string, projectId: string | null, sectionId: string | null, parentId: string | null): Promise<Task> =>
+        task({ id: "subtask-1", title, projectId, sectionId, parentId })
+    );
+
+    renderApp(
+      Object.freeze({
+        ...baseApi(Object.freeze([task({ id: "task-1", title: "Plan MVP" })])),
+        createTask
+      })
+    );
+
+    await screen.findByText("Plan MVP");
+    await userEvent.click(screen.getByRole("button", { name: "Add subtask to Plan MVP" }));
+    await userEvent.type(screen.getByLabelText("Subtask for Plan MVP"), "Write outline");
+    await userEvent.click(screen.getByRole("button", { name: "Add subtask" }));
+
+    await waitFor(() => expect(createTask).toHaveBeenCalledWith("Write outline", null, null, "task-1"));
   });
 
   it("shows a created project from the create response", async () => {
@@ -167,8 +200,8 @@ describe("TaskApp", () => {
 
   it("creates inbox sections and moves inbox tasks into them", async () => {
     let sections = Object.freeze([] as ReadonlyArray<Section>);
-    const moveTask = vi.fn(async (id: string, projectId: string | null, sectionId: string | null): Promise<Task> =>
-      task({ id, title: "Sort receipts", projectId, sectionId })
+    const moveTask = vi.fn(async (id: string, projectId: string | null, sectionId: string | null, parentId: string | null): Promise<Task> =>
+      task({ id, title: "Sort receipts", projectId, sectionId, parentId })
     );
 
     renderApp(
@@ -191,7 +224,7 @@ describe("TaskApp", () => {
     const dataTransfer = dragTask("Sort receipts");
     fireEvent.drop(await screen.findByLabelText("Section Later"), { dataTransfer });
 
-    await waitFor(() => expect(moveTask).toHaveBeenCalledWith("task-1", null, "section-1"));
+    await waitFor(() => expect(moveTask).toHaveBeenCalledWith("task-1", null, "section-1", null));
   });
 
   it("shows a created inbox section from the create response", async () => {
@@ -213,8 +246,8 @@ describe("TaskApp", () => {
   });
 
   it("moves tasks between inbox and projects with drag and drop", async () => {
-    const moveTask = vi.fn(async (id: string, projectId: string | null, sectionId: string | null): Promise<Task> =>
-      task({ id, title: "Plan launch", projectId, sectionId })
+    const moveTask = vi.fn(async (id: string, projectId: string | null, sectionId: string | null, parentId: string | null): Promise<Task> =>
+      task({ id, title: "Plan launch", projectId, sectionId, parentId })
     );
 
     renderApp(
@@ -230,7 +263,29 @@ describe("TaskApp", () => {
     const dataTransfer = dragTask("Plan launch");
     fireEvent.drop(screen.getByRole("button", { name: "Inbox" }), { dataTransfer });
 
-    await waitFor(() => expect(moveTask).toHaveBeenCalledWith("task-1", null, null));
+    await waitFor(() => expect(moveTask).toHaveBeenCalledWith("task-1", null, null, null));
+  });
+
+  it("moves a task inside another task with drag and drop", async () => {
+    const moveTask = vi.fn(async (id: string, projectId: string | null, sectionId: string | null, parentId: string | null): Promise<Task> =>
+      task({ id, title: "Child", projectId, sectionId, parentId })
+    );
+
+    renderApp(
+      Object.freeze({
+        ...baseApi(Object.freeze([
+          task({ id: "parent", title: "Parent task" }),
+          task({ id: "child", title: "Child task" })
+        ])),
+        moveTask
+      })
+    );
+
+    await screen.findByText("Parent task");
+    const dataTransfer = dragTask("Child task");
+    fireEvent.drop(screen.getByText("Parent task").closest(".task-row") ?? screen.getByText("Parent task"), { dataTransfer });
+
+    await waitFor(() => expect(moveTask).toHaveBeenCalledWith("child", null, null, "parent"));
   });
 
   it("calls update and delete handlers", async () => {
@@ -260,8 +315,8 @@ describe("TaskApp", () => {
 
   it("assigns a task to a project while editing", async () => {
     const updateTaskTitle = vi.fn(async (id: string, title: string): Promise<Task> => task({ id, title }));
-    const moveTask = vi.fn(async (id: string, projectId: string | null, sectionId: string | null): Promise<Task> =>
-      task({ id, title: "Plan MVP", projectId, sectionId })
+    const moveTask = vi.fn(async (id: string, projectId: string | null, sectionId: string | null, parentId: string | null): Promise<Task> =>
+      task({ id, title: "Plan MVP", projectId, sectionId, parentId })
     );
 
     renderApp(
@@ -279,7 +334,49 @@ describe("TaskApp", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(updateTaskTitle).toHaveBeenCalledWith("1", "Plan MVP"));
-    await waitFor(() => expect(moveTask).toHaveBeenCalledWith("1", "project-1", null));
+    await waitFor(() => expect(moveTask).toHaveBeenCalledWith("1", "project-1", null, null));
+  });
+
+  it("updates and deletes inbox sections", async () => {
+    const updateSection = vi.fn(async (id: string, title: string): Promise<Section> => section({ id, title }));
+    const deleteSection = vi.fn(async () => undefined);
+
+    renderApp(
+      Object.freeze({
+        ...baseApi(Object.freeze([])),
+        listSections: async () => Object.freeze([section({ id: "section-1", title: "Later" })]),
+        updateSection,
+        deleteSection
+      })
+    );
+
+    await screen.findByRole("heading", { name: "Later" });
+    await userEvent.click(screen.getByRole("button", { name: "Edit section Later" }));
+    const editInput = screen.getAllByLabelText("Section title").at(-1);
+
+    if (editInput === undefined) {
+      throw new Error("Missing section edit input");
+    }
+
+    await userEvent.clear(editInput);
+    await userEvent.type(editInput, "Soon");
+    await userEvent.click(screen.getByRole("button", { name: "Save section" }));
+
+    await waitFor(() => expect(updateSection).toHaveBeenCalledWith("section-1", "Soon"));
+
+    await userEvent.click(await screen.findByRole("button", { name: "Delete section Soon" }));
+
+    await waitFor(() => expect(deleteSection).toHaveBeenCalledWith("section-1"));
+  });
+
+  it("previews markdown for the current task list", async () => {
+    renderApp(baseApi(Object.freeze([task({ id: "1", title: "Plan MVP", completed: true, priority: 1 })])));
+
+    await screen.findByText("Plan MVP");
+    await userEvent.click(screen.getByRole("button", { name: "Preview markdown" }));
+
+    expect(await screen.findByRole("dialog", { name: "Markdown preview" })).toBeInTheDocument();
+    expect(screen.getByText(/- \[x\] Plan MVP \(P1\)/)).toBeInTheDocument();
   });
 });
 
@@ -327,7 +424,7 @@ describe("createTaskApi", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    await createTaskApi("http://api.test").moveTask("task-1", "project-1", null);
+    await createTaskApi("http://api.test").moveTask("task-1", "project-1", null, "parent-1");
 
     expect(fetchMock).toHaveBeenCalledWith(
       "http://api.test/tasks/task-1/move",
@@ -335,7 +432,7 @@ describe("createTaskApi", () => {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          parentId: null,
+          parentId: "parent-1",
           projectId: "project-1",
           sectionId: null,
           beforeId: null,

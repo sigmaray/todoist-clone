@@ -82,4 +82,30 @@ describe("POST /tasks", () => {
       sectionId: sectionResponse.body.section.id
     });
   });
+
+  it("updates and deletes sections without deleting tasks", async () => {
+    const agent = request(createTestServer());
+    const sectionResponse = await agent.post("/sections").send({ title: "Later" }).expect(201);
+    const taskResponse = await agent
+      .post("/tasks")
+      .send({ title: "Keep me", sectionId: sectionResponse.body.section.id })
+      .expect(201);
+
+    await agent.patch(`/sections/${sectionResponse.body.section.id}`).send({ title: "Soon" }).expect(200);
+
+    const sections = await agent.get("/sections").expect(200);
+
+    expect(sections.body.sections[0]).toMatchObject({ title: "Soon" });
+
+    await agent.delete(`/sections/${sectionResponse.body.section.id}`).expect(200);
+
+    const tasks = await agent.get("/tasks").expect(200);
+
+    expect(tasks.body.tasks[0]).toMatchObject({
+      id: taskResponse.body.task.id,
+      title: "Keep me",
+      sectionId: null,
+      parentId: null
+    });
+  });
 });

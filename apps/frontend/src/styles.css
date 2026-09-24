@@ -112,9 +112,12 @@ select {
   border-radius: 8px;
   padding: 14px;
   background: #fffdfb;
+  transition: border-color 140ms ease, background-color 140ms ease;
 }
 
 .header {
+  display: grid;
+  gap: 12px;
   margin-bottom: 24px;
 }
 
@@ -183,11 +186,49 @@ h1 {
 
 .task-row {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto auto auto;
+  grid-template-columns: 24px minmax(0, 1fr) auto auto auto auto;
   align-items: center;
   gap: 10px;
   min-height: 44px;
   border-bottom: 1px solid #e5ded7;
+  border-radius: 8px;
+  transition:
+    background-color 140ms ease,
+    box-shadow 140ms ease,
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.task-row:hover {
+  background: #fff8f5;
+  box-shadow: 0 1px 0 #e5ded7;
+}
+
+.task-row.dragging {
+  opacity: 0.48;
+  transform: scale(0.99);
+}
+
+.task-row.drag-target {
+  background: #f0faf7;
+  box-shadow: inset 3px 0 0 #3c5f5a;
+}
+
+.export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.export-actions button,
+.subtask-form button {
+  border: 1px solid #d7d0ca;
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #312c28;
+  background: #fff;
+  cursor: pointer;
 }
 
 .task-title {
@@ -217,15 +258,97 @@ h1 {
   color: #9f2418;
 }
 
-.edit-form {
+.edit-panel {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-column: 2 / -1;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 220px) auto;
   gap: 8px;
+  align-items: end;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #e5ded7;
+  border-radius: 8px;
+  background: #fffdfb;
+}
+
+.edit-panel label {
+  display: grid;
+  gap: 5px;
+  color: #4f4944;
+  font-size: 0.85rem;
+}
+
+.edit-panel input,
+.edit-panel select,
+.section-edit-form input {
+  min-width: 0;
+  border: 1px solid #d7d0ca;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fff;
+  color: #221f1f;
+}
+
+.edit-panel-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.edit-panel button,
+.section-actions button,
+.section-edit-form button {
+  border: 1px solid #d7d0ca;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.section-header {
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
   align-items: center;
 }
 
-.edit-form input,
-.edit-form select {
+.section-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.section-actions .danger {
+  color: #9f2418;
+}
+
+.section-edit-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: end;
+  width: 100%;
+}
+
+.section-edit-form label {
+  grid-column: 1 / -1;
+  color: #4f4944;
+  font-size: 0.9rem;
+}
+
+.subtask-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: end;
+  padding: 10px 0;
+}
+
+.subtask-form label {
+  grid-column: 1 / -1;
+  color: #4f4944;
+  font-size: 0.9rem;
+}
+
+.subtask-form input {
   min-width: 0;
   border: 1px solid #d7d0ca;
   border-radius: 8px;
@@ -233,11 +356,56 @@ h1 {
   background: #fff;
 }
 
-.edit-form button {
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(34 31 31 / 0.35);
+  z-index: 10;
+}
+
+.modal {
+  display: grid;
+  gap: 14px;
+  width: min(760px, 100%);
+  max-height: min(720px, calc(100vh - 40px));
+  border-radius: 8px;
+  padding: 18px;
+  background: #fffdfb;
+  box-shadow: 0 18px 50px rgb(34 31 31 / 0.22);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.modal-header button {
   border: 1px solid #d7d0ca;
   border-radius: 8px;
   padding: 8px 10px;
   background: #fff;
+  cursor: pointer;
+}
+
+.modal pre {
+  overflow: auto;
+  max-height: 560px;
+  margin: 0;
+  border: 1px solid #e5ded7;
+  border-radius: 8px;
+  padding: 14px;
+  background: #f7f5f2;
+  white-space: pre-wrap;
 }
 
 .muted,
@@ -330,7 +498,12 @@ h1 {
     justify-self: start;
   }
 
-  .edit-form {
+  .edit-panel,
+  .section-edit-form {
+    grid-template-columns: 1fr;
+  }
+
+  .subtask-form {
     grid-template-columns: 1fr;
   }
 

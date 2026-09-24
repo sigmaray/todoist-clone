@@ -154,6 +154,39 @@ export const createPostgresTaskRepository = (databaseUrl: string): TaskRepositor
 
       return section;
     },
+    updateSection: async (id, title) => {
+      const rows = await db
+        .update(sectionsTable)
+        .set({
+          title,
+          updatedAt: new Date()
+        })
+        .where(eq(sectionsTable.id, id))
+        .returning();
+
+      return firstSection(rows);
+    },
+    deleteSection: async (id) => {
+      const rows = await db
+        .delete(sectionsTable)
+        .where(eq(sectionsTable.id, id))
+        .returning({ id: sectionsTable.id });
+
+      if (rows.length === 0) {
+        return false;
+      }
+
+      await db
+        .update(tasksTable)
+        .set({
+          parentId: null,
+          sectionId: null,
+          updatedAt: new Date()
+        })
+        .where(eq(tasksTable.sectionId, id));
+
+      return true;
+    },
     create: async (title, priority, parentId, projectId, sectionId) => {
       const id = crypto.randomUUID();
       const lexicalOrder = await findSiblingOrder(db, parentId, projectId, sectionId, null, null);

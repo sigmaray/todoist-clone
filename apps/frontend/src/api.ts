@@ -6,10 +6,12 @@ export type TaskApi = Readonly<{
   createProject: (title: string) => Promise<Project>;
   listSections: () => Promise<ReadonlyArray<Section>>;
   createSection: (title: string, projectId: ProjectId | null) => Promise<Section>;
-  createTask: (title: string, projectId: ProjectId | null, sectionId: SectionId | null) => Promise<Task>;
+  updateSection: (id: SectionId, title: string) => Promise<Section>;
+  deleteSection: (id: SectionId) => Promise<void>;
+  createTask: (title: string, projectId: ProjectId | null, sectionId: SectionId | null, parentId: string | null) => Promise<Task>;
   patchTask: (id: string, completed: boolean) => Promise<Task>;
   updateTaskTitle: (id: string, title: string) => Promise<Task>;
-  moveTask: (id: string, projectId: ProjectId | null, sectionId: SectionId | null) => Promise<Task>;
+  moveTask: (id: string, projectId: ProjectId | null, sectionId: SectionId | null, parentId: string | null) => Promise<Task>;
   deleteTask: (id: string) => Promise<void>;
 }>;
 
@@ -58,24 +60,42 @@ export const createTaskApi = (baseUrl = ""): TaskApi =>
 
       return data.section;
     },
-    createTask: async (title, projectId, sectionId) => {
+    updateSection: async (id, title) => {
+      const data = await readJson<{ section: Section }>(
+        await fetch(`${baseUrl}/sections/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title })
+        })
+      );
+
+      return data.section;
+    },
+    deleteSection: async (id) => {
+      await readJson<{ deleted: true }>(
+        await fetch(`${baseUrl}/sections/${id}`, {
+          method: "DELETE"
+        })
+      );
+    },
+    createTask: async (title, projectId, sectionId, parentId) => {
       const data = await readJson<{ task: Task }>(
         await fetch(`${baseUrl}/tasks`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title, projectId, sectionId })
+          body: JSON.stringify({ title, projectId, sectionId, parentId })
         })
       );
 
       return data.task;
     },
-    moveTask: async (id, projectId, sectionId) => {
+    moveTask: async (id, projectId, sectionId, parentId) => {
       const data = await readJson<{ task: Task }>(
         await fetch(`${baseUrl}/tasks/${id}/move`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            parentId: null,
+            parentId,
             projectId,
             sectionId,
             beforeId: null,

@@ -23,6 +23,8 @@ export type TaskRepository = Readonly<{
   createProject: (title: string) => Promise<Project>;
   listSections: () => Promise<ReadonlyArray<Section>>;
   createSection: (title: string, projectId: ProjectId | null) => Promise<Section>;
+  updateSection: (id: SectionId, title: string) => Promise<Section | null>;
+  deleteSection: (id: SectionId) => Promise<boolean>;
   create: (
     title: string,
     priority: Priority,
@@ -104,6 +106,35 @@ export const createMemoryTaskRepository = (
       sections = Object.freeze([...sections, section]);
 
       return section;
+    },
+    updateSection: async (id, title) => {
+      const existing = sections.find((section) => section.id === id);
+
+      if (existing === undefined) {
+        return null;
+      }
+
+      const updated = freezeSection({
+        ...existing,
+        title,
+        updatedAt: now()
+      });
+
+      sections = Object.freeze(sections.map((section) => (section.id === id ? updated : section)));
+
+      return updated;
+    },
+    deleteSection: async (id) => {
+      const existing = sections.find((section) => section.id === id);
+
+      if (existing === undefined) {
+        return false;
+      }
+
+      sections = Object.freeze(sections.filter((section) => section.id !== id));
+      replace(tasks.map((task) => (task.sectionId === id ? freezeTask({ ...task, parentId: null, sectionId: null, updatedAt: now() }) : task)));
+
+      return true;
     },
     create: async (title, priority, parentId, projectId, sectionId) => {
       const createdAt = now();

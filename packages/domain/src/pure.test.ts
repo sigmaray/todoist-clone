@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildTaskTree, generateLexicalOrder } from "./pure";
+import { buildTaskTree, generateLexicalOrder, renderTaskMarkdownDocument } from "./pure";
 import type { Task } from "./types";
 
 const task = (values: Partial<Task> & Pick<Task, "id" | "title" | "lexicalOrder">): Task =>
@@ -42,5 +42,24 @@ describe("generateLexicalOrder", () => {
     expect(generateLexicalOrder(null, null)).toBeTruthy();
     expect(generateLexicalOrder(null, "1") < "1").toBe(true);
     expect(generateLexicalOrder("z", null) > "z").toBe(true);
+  });
+});
+
+describe("renderTaskMarkdownDocument", () => {
+  it("renders nested tasks as a markdown checklist", () => {
+    const tree = buildTaskTree([
+      task({ id: "root", title: "Plan release", lexicalOrder: "a", completed: true, priority: 1 }),
+      task({ id: "child", title: "Write notes", parentId: "root", lexicalOrder: "a" })
+    ]);
+
+    expect(renderTaskMarkdownDocument("Inbox", tree)).toBe(
+      [
+        "# Inbox",
+        "",
+        "- [x] Plan release (P1)",
+        "  - [ ] Write notes (P4)",
+        ""
+      ].join("\n")
+    );
   });
 });

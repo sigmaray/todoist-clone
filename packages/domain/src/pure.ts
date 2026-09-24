@@ -48,3 +48,20 @@ export const generateLexicalOrder = (before: string | null, after: string | null
 
   return findMiddle(0, "");
 };
+
+const checkbox = (completed: boolean) => (completed ? "x" : " ");
+
+const renderTaskMarkdown = (task: TaskNode, depth: number): ReadonlyArray<string> =>
+  Object.freeze([
+    `${"  ".repeat(depth)}- [${checkbox(task.completed)}] ${task.title} (P${task.priority})`,
+    ...task.children.flatMap((child) => renderTaskMarkdown(child, depth + 1))
+  ]);
+
+export const renderTaskMarkdownDocument = (
+  title: string,
+  tasks: ReadonlyArray<TaskNode>
+): string => {
+  const body = tasks.flatMap((task) => renderTaskMarkdown(task, 0));
+
+  return [`# ${title}`, "", ...(body.length > 0 ? body : ["_No tasks._"]), ""].join("\n");
+};

@@ -41,6 +41,10 @@ const createSectionSchema = z.object({
   projectId: z.string().nullable().default(null)
 });
 
+const patchSectionSchema = z.object({
+  title: z.string().trim().min(1)
+});
+
 const parseJson = async (request: Request) => {
   const contentType = request.headers.get("content-type") ?? "";
 
@@ -103,6 +107,24 @@ export const createApp = (
     const section = await repository.createSection(result.data.title, result.data.projectId);
 
     return context.json({ section }, 201);
+  });
+
+  app.patch("/sections/:id", async (context) => {
+    const result = patchSectionSchema.safeParse(await parseJson(context.req.raw));
+
+    if (!result.success) {
+      return context.json({ error: "Invalid section patch" }, 400);
+    }
+
+    const section = await repository.updateSection(context.req.param("id"), result.data.title);
+
+    return section === null ? context.json({ error: "Section not found" }, 404) : context.json({ section });
+  });
+
+  app.delete("/sections/:id", async (context) => {
+    const deleted = await repository.deleteSection(context.req.param("id"));
+
+    return deleted ? context.json({ deleted: true }) : context.json({ error: "Section not found" }, 404);
   });
 
   app.post("/tasks", async (context) => {
