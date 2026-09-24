@@ -38,4 +38,48 @@ describe("POST /tasks", () => {
 
     expect(emptyResponse.body.tasks).toEqual([]);
   });
+
+  it("creates projects, inbox sections, and moves tasks between them", async () => {
+    const agent = request(createTestServer());
+    const projectResponse = await agent.post("/projects").send({ title: "Roadmap" }).expect(201);
+    const sectionResponse = await agent.post("/sections").send({ title: "Later" }).expect(201);
+    const taskResponse = await agent.post("/tasks").send({ title: "Sort inbox" }).expect(201);
+
+    await agent
+      .put(`/tasks/${taskResponse.body.task.id}/move`)
+      .send({
+        parentId: null,
+        projectId: projectResponse.body.project.id,
+        sectionId: null,
+        beforeId: null,
+        afterId: null
+      })
+      .expect(200);
+
+    const projectTasks = await agent.get("/tasks").expect(200);
+
+    expect(projectTasks.body.tasks[0]).toMatchObject({
+      title: "Sort inbox",
+      projectId: projectResponse.body.project.id,
+      sectionId: null
+    });
+
+    await agent
+      .put(`/tasks/${taskResponse.body.task.id}/move`)
+      .send({
+        parentId: null,
+        projectId: null,
+        sectionId: sectionResponse.body.section.id,
+        beforeId: null,
+        afterId: null
+      })
+      .expect(200);
+
+    const sectionTasks = await agent.get("/tasks").expect(200);
+
+    expect(sectionTasks.body.tasks[0]).toMatchObject({
+      projectId: null,
+      sectionId: sectionResponse.body.section.id
+    });
+  });
 });

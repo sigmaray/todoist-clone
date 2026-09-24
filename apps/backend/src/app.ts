@@ -11,19 +11,34 @@ const prioritySchema = z.union([z.literal(1), z.literal(2), z.literal(3), z.lite
 const createTaskSchema = z.object({
   title: z.string().trim().min(1),
   priority: prioritySchema.default(4),
-  parentId: z.string().nullable().default(null)
+  parentId: z.string().nullable().default(null),
+  projectId: z.string().nullable().default(null),
+  sectionId: z.string().nullable().default(null)
 });
 
 const patchTaskSchema = z.object({
   title: z.string().trim().min(1).optional(),
   completed: z.boolean().optional(),
-  priority: prioritySchema.optional()
+  priority: prioritySchema.optional(),
+  projectId: z.string().nullable().optional(),
+  sectionId: z.string().nullable().optional()
 });
 
 const moveTaskSchema = z.object({
   parentId: z.string().nullable().default(null),
+  projectId: z.string().nullable().default(null),
+  sectionId: z.string().nullable().default(null),
   beforeId: z.string().nullable().default(null),
   afterId: z.string().nullable().default(null)
+});
+
+const createProjectSchema = z.object({
+  title: z.string().trim().min(1)
+});
+
+const createSectionSchema = z.object({
+  title: z.string().trim().min(1),
+  projectId: z.string().nullable().default(null)
 });
 
 const parseJson = async (request: Request) => {
@@ -54,6 +69,42 @@ export const createApp = (
     return context.json({ tasks, tree: buildTaskTree(tasks) });
   });
 
+  app.get("/projects", async (context) => {
+    const projects = await repository.listProjects();
+
+    return context.json({ projects });
+  });
+
+  app.post("/projects", async (context) => {
+    const result = createProjectSchema.safeParse(await parseJson(context.req.raw));
+
+    if (!result.success) {
+      return context.json({ error: "Invalid project payload" }, 400);
+    }
+
+    const project = await repository.createProject(result.data.title);
+
+    return context.json({ project }, 201);
+  });
+
+  app.get("/sections", async (context) => {
+    const sections = await repository.listSections();
+
+    return context.json({ sections });
+  });
+
+  app.post("/sections", async (context) => {
+    const result = createSectionSchema.safeParse(await parseJson(context.req.raw));
+
+    if (!result.success) {
+      return context.json({ error: "Invalid section payload" }, 400);
+    }
+
+    const section = await repository.createSection(result.data.title, result.data.projectId);
+
+    return context.json({ section }, 201);
+  });
+
   app.post("/tasks", async (context) => {
     const result = createTaskSchema.safeParse(await parseJson(context.req.raw));
 
@@ -61,7 +112,13 @@ export const createApp = (
       return context.json({ error: "Invalid task payload" }, 400);
     }
 
-    const task = await repository.create(result.data.title, result.data.priority, result.data.parentId);
+    const task = await repository.create(
+      result.data.title,
+      result.data.priority,
+      result.data.parentId,
+      result.data.projectId,
+      result.data.sectionId
+    );
 
     return context.json({ task }, 201);
   });

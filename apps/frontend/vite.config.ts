@@ -5,6 +5,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
+      "/projects": "http://127.0.0.1:3000",
+      "/sections": "http://127.0.0.1:3000",
       "/tasks": "http://127.0.0.1:3000",
       "/tools-api": "http://127.0.0.1:3000"
     }

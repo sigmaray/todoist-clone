@@ -1,27 +1,43 @@
 import { generateLexicalOrder } from "@todoist-clonse/domain";
-import type { Priority, Task, TaskId } from "@todoist-clonse/domain";
+import type { Priority, Project, ProjectId, Section, SectionId, Task, TaskId } from "@todoist-clonse/domain";
 
 export type TaskPatch = Readonly<{
   title?: string;
   completed?: boolean;
   priority?: Priority;
+  projectId?: ProjectId | null;
+  sectionId?: SectionId | null;
 }>;
 
 export type TaskMove = Readonly<{
   parentId: TaskId | null;
+  projectId: ProjectId | null;
+  sectionId: SectionId | null;
   beforeId: TaskId | null;
   afterId: TaskId | null;
 }>;
 
 export type TaskRepository = Readonly<{
   list: () => Promise<ReadonlyArray<Task>>;
-  create: (title: string, priority: Priority, parentId: TaskId | null) => Promise<Task>;
+  listProjects: () => Promise<ReadonlyArray<Project>>;
+  createProject: (title: string) => Promise<Project>;
+  listSections: () => Promise<ReadonlyArray<Section>>;
+  createSection: (title: string, projectId: ProjectId | null) => Promise<Section>;
+  create: (
+    title: string,
+    priority: Priority,
+    parentId: TaskId | null,
+    projectId: ProjectId | null,
+    sectionId: SectionId | null
+  ) => Promise<Task>;
   patch: (id: TaskId, patch: TaskPatch) => Promise<Task | null>;
   move: (id: TaskId, move: TaskMove) => Promise<Task | null>;
   delete: (id: TaskId) => Promise<boolean>;
 }>;
 
 const freezeTask = (task: Task): Task => Object.freeze(task);
+const freezeProject = (project: Project): Project => Object.freeze(project);
+const freezeSection = (section: Section): Section => Object.freeze(section);
 
 const now = () => new Date().toISOString();
 
@@ -30,10 +46,14 @@ const compareOrder = (left: Task, right: Task) => left.lexicalOrder.localeCompar
 const findSiblingOrder = (
   tasks: ReadonlyArray<Task>,
   parentId: TaskId | null,
+  projectId: ProjectId | null,
+  sectionId: SectionId | null,
   beforeId: TaskId | null,
   afterId: TaskId | null
 ) => {
-  const siblings = tasks.filter((task) => task.parentId === parentId).toSorted(compareOrder);
+  const siblings = tasks
+    .filter((task) => task.parentId === parentId && task.projectId === projectId && task.sectionId === sectionId)
+    .toSorted(compareOrder);
   const before = beforeId === null ? siblings.at(-1) : siblings.find((task) => task.id === beforeId);
   const after = afterId === null ? null : siblings.find((task) => task.id === afterId);
 
@@ -44,6 +64,8 @@ export const createMemoryTaskRepository = (
   initialTasks: ReadonlyArray<Task> = Object.freeze([])
 ): TaskRepository => {
   let tasks = Object.freeze(initialTasks.map(freezeTask));
+  let projects = Object.freeze([] as ReadonlyArray<Project>);
+  let sections = Object.freeze([] as ReadonlyArray<Section>);
 
   const replace = (nextTasks: ReadonlyArray<Task>) => {
     tasks = Object.freeze(nextTasks.map(freezeTask));
@@ -51,7 +73,39 @@ export const createMemoryTaskRepository = (
 
   return Object.freeze({
     list: async () => tasks,
-    create: async (title, priority, parentId) => {
+    listProjects: async () => projects,
+    createProject: async (title) => {
+      const createdAt = now();
+      const project = freezeProject({
+        id: crypto.randomUUID(),
+        title,
+        lexicalOrder: generateLexicalOrder(projects.at(-1)?.lexicalOrder ?? null, null),
+        createdAt,
+        updatedAt: createdAt
+      });
+
+      projects = Object.freeze([...projects, project]);
+
+      return project;
+    },
+    listSections: async () => sections,
+    createSection: async (title, projectId) => {
+      const createdAt = now();
+      const siblings = sections.filter((section) => section.projectId === projectId);
+      const section = freezeSection({
+        id: crypto.randomUUID(),
+        title,
+        projectId,
+        lexicalOrder: generateLexicalOrder(siblings.at(-1)?.lexicalOrder ?? null, null),
+        createdAt,
+        updatedAt: createdAt
+      });
+
+      sections = Object.freeze([...sections, section]);
+
+      return section;
+    },
+    create: async (title, priority, parentId, projectId, sectionId) => {
       const createdAt = now();
       const task = freezeTask({
         id: crypto.randomUUID(),
@@ -59,7 +113,9 @@ export const createMemoryTaskRepository = (
         completed: false,
         priority,
         parentId,
-        lexicalOrder: findSiblingOrder(tasks, parentId, null, null),
+        projectId,
+        sectionId,
+        lexicalOrder: findSiblingOrder(tasks, parentId, projectId, sectionId, null, null),
         createdAt,
         updatedAt: createdAt
       });
@@ -95,9 +151,13 @@ export const createMemoryTaskRepository = (
       const updated = freezeTask({
         ...existing,
         parentId: move.parentId,
+        projectId: move.projectId,
+        sectionId: move.sectionId,
         lexicalOrder: findSiblingOrder(
           tasks.filter((task) => task.id !== id),
           move.parentId,
+          move.projectId,
+          move.sectionId,
           move.beforeId,
           move.afterId
         ),

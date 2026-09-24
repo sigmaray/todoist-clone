@@ -7,6 +7,8 @@ const task = (values: Partial<Task> & Pick<Task, "id" | "title" | "lexicalOrder"
     completed: false,
     priority: 4,
     parentId: null,
+    projectId: null,
+    sectionId: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     ...values

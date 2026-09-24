@@ -36,7 +36,12 @@ tasks:
       - pnpm test
 
   test:docker:
-    desc: Run all tests through Docker Compose
+    desc: Alias for test:docker:app
+    cmds:
+      - task: test:docker:app
+
+  test:docker:app:
+    desc: Run the app in Docker test mode, execute all tests, and stop it
     cmds:
       - |
         status=0

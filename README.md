@@ -73,6 +73,7 @@ The tools page is disabled in production mode.
 task test
 task test:unit
 task test:docker
+task test:docker:app
 pnpm test:e2e
 ```
 
@@ -178,6 +179,7 @@ pnpm dev:frontend
 task test
 task test:unit
 task test:docker
+task test:docker:app
 pnpm test:e2e
 ```
 
