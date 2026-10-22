@@ -12,7 +12,7 @@ import {
 import type { Project, ProjectId, Section, SectionId, Task, TaskId, TaskNode } from "@todoist-clone/domain";
 import clsx from "clsx";
 import JSZip from "jszip";
-import { Archive, ClipboardCopy, Code2, Database, Edit3, Inbox, Plus, Trash2, X } from "lucide-react";
+import { Archive, ClipboardCopy, Code2, Database, Download, Edit3, Eye, Inbox, Plus, Trash2, X } from "lucide-react";
 import type { DragEvent, FormEvent, KeyboardEvent, ReactElement } from "react";
 import { useState } from "react";
 import "./vendor/bootstrap.min.css";
@@ -144,7 +144,6 @@ const renderTaskNodes = (
           ) : (
             <span className={task.completed ? "task-title completed" : "task-title"}>{task.title}</span>
           )}
-          <span className="priority">P{task.priority}</span>
           <button type="button" className="task-action" aria-label={`Edit task ${task.title}`} onClick={() => actions.startEditing(task)}>
             <Edit3 size={14} aria-hidden="true" />
             Edit
@@ -869,7 +868,6 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
                 </button>
                 <button type="button" aria-label={`Edit project ${project.title}`} onClick={() => startProjectEdit(project)}>
                   <Edit3 size={14} aria-hidden="true" />
-                  Edit
                 </button>
                 <button
                   type="button"
@@ -878,7 +876,6 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
                   onClick={() => deleteProjectMutation.mutate(project)}
                 >
                   <Trash2 size={14} aria-hidden="true" />
-                  Delete
                 </button>
               </div>
             )
@@ -892,18 +889,20 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
             Add project
           </button>
         </form>
-        <button type="button" className="sidebar-export btn btn-success" onClick={exportZip}>
+        <button type="button" className="nav-button sidebar-export" onClick={exportZip}>
           <Archive size={16} aria-hidden="true" />
           Export all ZIP
         </button>
-        <button type="button" className="sidebar-export btn btn-outline-success" onClick={exportMarkdown}>
+        <button type="button" className="nav-button sidebar-export" onClick={exportMarkdown}>
+          <Download size={16} aria-hidden="true" />
           Export all markdown
         </button>
         <button
           type="button"
-          className="sidebar-export btn btn-outline-secondary"
+          className="nav-button sidebar-export"
           onClick={() => setMarkdownModal(Object.freeze({ title: "All tasks", markdown: allMarkdown }))}
         >
+          <Eye size={16} aria-hidden="true" />
           Preview all markdown
         </button>
       </aside>

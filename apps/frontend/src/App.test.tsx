@@ -557,6 +557,7 @@ describe("TaskApp", () => {
     renderApp(baseApi(Object.freeze([task({ id: "1", title: "Plan MVP", completed: true, priority: 1 })])));
 
     await screen.findByText("Plan MVP");
+    expect(screen.queryByText("P1")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Preview markdown" }));
 
     expect(await screen.findByRole("dialog", { name: "Markdown preview" })).toBeInTheDocument();
