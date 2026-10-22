@@ -134,6 +134,7 @@ test("edits task details and copies all Markdown", async ({ context, page }) => 
   await expect(page).toHaveURL(/\/?project=/);
   await expect(page.getByRole("heading", { name: navigationProjectTitle })).toBeVisible();
 
+  await page.getByRole("link", { name: "Export", exact: true }).click();
   await page.getByRole("button", { name: "Copy all markdown" }).click();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain(title);
   const copiedMarkdown = await page.evaluate(() => navigator.clipboard.readText());

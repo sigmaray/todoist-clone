@@ -715,14 +715,44 @@ describe("TaskApp", () => {
     expect(screen.queryByRole("dialog", { name: "Markdown preview" })).not.toBeInTheDocument();
   });
 
-  it("previews markdown for all tasks from the sidebar", async () => {
-    renderApp(baseApi(Object.freeze([task({ id: "1", title: "All tasks note" })])));
+  it("exports a complete JSON document and previews all Markdown on the Export page", async () => {
+    window.history.replaceState({}, "", "/export");
+    const inboxTask = task({
+      id: "inbox-task",
+      title: "All tasks note",
+      description: "Task description",
+      dueDate: "2026-11-18",
+      labels: Object.freeze(["important"]),
+      comments: Object.freeze([Object.freeze({ id: "comment-1", body: "Task comment", createdAt: "2026-10-22T10:00:00.000Z" })])
+    });
+    const api = Object.freeze({
+      ...baseApi(Object.freeze([inboxTask])),
+      getInboxDescription: async () => "Inbox description",
+      listProjects: async () => Object.freeze([project({ id: "project-1", title: "Roadmap", description: "Project description" })]),
+      listSections: async () => Object.freeze([section({ id: "section-1", title: "Later", projectId: "project-1" })])
+    });
+    renderApp(api);
 
-    await screen.findByText("All tasks note");
+    expect(await screen.findByRole("heading", { name: "Export" })).toBeInTheDocument();
+    const navigation = within(screen.getByLabelText("Navigation"));
+    expect(navigation.queryByRole("button", { name: "Export all ZIP" })).not.toBeInTheDocument();
+    expect(navigation.queryByRole("button", { name: "Export all markdown" })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Preview all markdown" }));
-
     expect(await screen.findByRole("dialog", { name: "Markdown preview" })).toBeInTheDocument();
     expect(screen.getByText(/- \[ \] All tasks note/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    await userEvent.click(screen.getByRole("button", { name: "Preview all JSON" }));
+    const jsonDialog = await screen.findByRole("dialog", { name: "JSON preview" });
+    const jsonText = jsonDialog.querySelector("pre")?.textContent;
+    if (jsonText === null || jsonText === undefined) throw new Error("Missing JSON preview content");
+    const exported = JSON.parse(jsonText) as { inbox: { description: string; tasks: ReadonlyArray<{ description: string; dueDate: string; comments: ReadonlyArray<{ body: string }> }> }; projects: ReadonlyArray<{ description: string; sections: ReadonlyArray<{ title: string }> }>; sections: ReadonlyArray<{ title: string }>; dates: ReadonlyArray<{ dueDate: string }>; comments: ReadonlyArray<{ body: string }> };
+    expect(exported.inbox.description).toBe("Inbox description");
+    expect(exported.inbox.tasks[0]).toMatchObject({ description: "Task description", dueDate: "2026-11-18", comments: [expect.objectContaining({ body: "Task comment" })] });
+    expect(exported.projects[0]).toMatchObject({ description: "Project description", sections: [expect.objectContaining({ title: "Later" })] });
+    expect(exported.sections).toEqual([expect.objectContaining({ title: "Later" })]);
+    expect(exported.dates).toEqual([expect.objectContaining({ dueDate: "2026-11-18" })]);
+    expect(exported.comments).toEqual([expect.objectContaining({ body: "Task comment" })]);
   });
 });
 

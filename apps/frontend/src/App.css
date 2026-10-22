@@ -254,8 +254,7 @@ textarea {
 }
 
 .project-nav-row > button:not(.nav-button),
-.project-edit-form button,
-.sidebar-export {
+.project-edit-form button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -288,11 +287,6 @@ textarea {
   border-radius: 8px;
   padding: 9px 10px;
   background: #fff;
-}
-
-.sidebar-export {
-  justify-self: stretch;
-  text-align: center;
 }
 
 .compact-form {
@@ -999,33 +993,6 @@ body {
   visibility: visible;
 }
 
-.sidebar-export {
-  justify-content: flex-start;
-  min-height: 34px;
-  white-space: nowrap;
-  border: 0 !important;
-  border-radius: 5px !important;
-  padding: 5px 7px !important;
-  color: #555 !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  font-size: 14px;
-}
-
-.sidebar-export:hover {
-  background: #f1efed !important;
-}
-
-.sidebar-export > svg {
-  display: block;
-  flex: 0 0 16px;
-  width: 16px;
-  height: 16px;
-  color: #d34b38;
-  stroke-width: 2.25px;
-  visibility: visible;
-}
-
 .compact-form {
   gap: 5px;
   padding: 6px 4px;
@@ -1628,8 +1595,7 @@ body {
   }
 
   .sidebar-group,
-  .sidebar > .compact-form,
-  .sidebar > .sidebar-export {
+  .sidebar > .compact-form {
     display: none;
   }
 
@@ -1714,11 +1680,7 @@ body {
 .dates-calendar-day button { display: block; width: 100%; overflow: hidden; border: 0; border-radius: 4px; padding: 3px 5px; background: #fff1ed; color: #9f382c; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 .dates-calendar-day button[draggable="true"] { cursor: grab; }
 .dates-calendar-day button[draggable="true"]:active { cursor: grabbing; }
-.sidebar-settings-exports { display: grid; gap: 5px; margin-top: auto; }
-.sidebar-settings-exports a { color: #6d655f; text-decoration: none; }
 @media (max-width: 700px) { .dates-calendar-day { min-height: 64px; padding: 4px; } .dates-calendar-day button { font-size: .72rem; } }
-.sidebar-settings-exports button { display: flex; align-items: center; gap: 8px; border: 0; padding: 7px 8px; color: #6d655f; background: transparent; text-align: left; cursor: pointer; }
-.sidebar-settings-exports button:hover { color: #b83f2d; background: #fff2ef; }
 .brand-mark { background: #d33f2f !important; }
 .task-details-modal .task-details-header-path { display: flex; align-items: center; gap: 9px; min-width: 0; color: #716a65; }
 .task-details-header-path a { color: #625952; text-decoration: none; }
@@ -1771,3 +1733,12 @@ body {
 .add-task-dialog .task-date-picker .date-picker-grid [role="gridcell"] button.selected { border: 1px solid #d6362b !important; color: #fff !important; background: #d6362b !important; font-weight: 700; box-shadow: 0 0 0 2px #fff, 0 0 0 4px #d6362b; }
 .task-details-modal .task-date-picker .date-picker-grid [role="gridcell"] button.today.selected,
 .add-task-dialog .task-date-picker .date-picker-grid [role="gridcell"] button.today.selected { box-shadow: 0 0 0 2px #fff, 0 0 0 4px #c83a2d; }
+.export-page { display: grid; gap: 18px; max-width: 900px; }
+.export-format-card { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 20px; }
+.export-format-card h2 { margin: 0 0 6px; font-size: 1.15rem; }
+.export-format-card p { margin: 0; color: #746c66; }
+.export-format-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.export-format-actions button { display: inline-flex; align-items: center; gap: 7px; border: 1px solid #e1dcd7; border-radius: 7px; padding: 8px 11px; color: #554e49; background: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+.export-format-actions button.btn-primary { border-color: #d6362b; color: #fff; background: #d6362b; }
+.export-format-actions button:hover { filter: brightness(.96); }
+@media (max-width: 820px) { .export-format-card { align-items: stretch; flex-direction: column; gap: 14px; } .export-format-actions { justify-content: flex-start; } }

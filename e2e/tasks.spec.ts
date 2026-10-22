@@ -345,9 +345,22 @@ test("creates projects, sections, subtasks, and exports markdown", async ({ cont
   await expect(page.getByText("Markdown copied")).toBeVisible();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain(inboxTask);
 
-  const download = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export all ZIP" }).click();
-  await expect((await download).suggestedFilename()).toBe("todoist-clone-markdown.zip");
+  await page.getByRole("link", { name: "Export", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Export" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Export all ZIP" })).toHaveCount(0);
+  const markdownDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export all markdown" }).click();
+  expect((await markdownDownload).suggestedFilename()).toBe("todoist-clone.md");
+  const jsonDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export all JSON" }).click();
+  expect((await jsonDownload).suggestedFilename()).toBe("todoist-clone.json");
+  await page.getByRole("button", { name: "Copy all JSON" }).click();
+  await expect(page.locator(".export-page [role=status]")).toHaveText("All JSON copied");
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain('"taskTree"');
+  await page.getByRole("button", { name: "Preview all JSON" }).click();
+  await expect(page.getByRole("dialog", { name: "JSON preview" })).toContainText('"projects"');
+  await page.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "Inbox", exact: true }).click();
 
   await page.getByRole("button", { name: `Delete section ${sectionTitle} edited` }).click();
   await expect(page.getByRole("heading", { name: `${sectionTitle} edited` })).not.toBeVisible();

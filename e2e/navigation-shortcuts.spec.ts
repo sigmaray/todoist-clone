@@ -146,6 +146,8 @@ test("task dialog, inline keyboard editing, navigation, search, and calendar wor
 
   await page.goto("/settings");
   const settingsNav = page.getByLabel("Navigation");
+  await expect(settingsNav.getByRole("link", { name: "Export" })).toHaveAttribute("href", "/export");
+  await expect(settingsNav.getByRole("button", { name: /Export all/ })).toHaveCount(0);
   await expect(settingsNav.getByRole("link", { name: "Dates" })).toBeVisible();
   await expect(settingsNav.getByRole("link", { name: "Labels", exact: true })).toBeVisible();
   await expect(settingsNav.getByRole("link", { name: renamedProject })).toBeVisible();

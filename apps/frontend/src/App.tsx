@@ -11,7 +11,6 @@ import {
 } from "@todoist-clone/domain";
 import type { Project, ProjectId, Section, SectionId, Task, TaskId, TaskNode } from "@todoist-clone/domain";
 import clsx from "clsx";
-import JSZip from "jszip";
 import { Archive, CalendarDays, ClipboardCopy, Code2, Copy, Database, Download, Edit3, Eye, Inbox, KeyRound, MoreHorizontal, Plus, Search, Settings, Tag, Trash2, X } from "lucide-react";
 import type { DragEvent, FormEvent, KeyboardEvent, ReactElement } from "react";
 import { useEffect, useRef, useState } from "react";
@@ -411,13 +410,6 @@ const dragPlacementFromEvent = (event: DragEvent<HTMLElement>): DragPlacement =>
   return y < height * 0.35 ? "before" : y > height * 0.65 ? "after" : "inside";
 };
 
-const slug = (value: string) =>
-  value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "") || "tasks";
-
 const currentMarkdown = (
   title: string,
   inboxRootTasks: ReadonlyArray<TaskNode>,
@@ -445,38 +437,6 @@ const currentMarkdown = (
     }))
   );
 };
-
-const allMarkdownFiles = (
-  projects: ReadonlyArray<Project>,
-  sections: ReadonlyArray<Section>,
-  tasks: ReadonlyArray<TaskNode>
-): ReadonlyArray<Readonly<{ name: string; content: string }>> =>
-  Object.freeze([
-    Object.freeze({
-      name: "inbox.md",
-      content: renderTaskMarkdownDocument(
-        "Inbox",
-        tasks.filter((task) => task.projectId === null && task.sectionId === null),
-        sections.filter((section) => section.projectId === null).map((section) => Object.freeze({
-          title: section.title,
-          tasks: tasks.filter((task) => task.projectId === null && task.sectionId === section.id)
-        }))
-      )
-    }),
-    ...projects.map((project) =>
-      Object.freeze({
-        name: `project-${slug(project.title)}.md`,
-        content: renderTaskMarkdownDocument(
-          project.title,
-          tasks.filter((task) => task.projectId === project.id && task.sectionId === null),
-          sections.filter((section) => section.projectId === project.id).map((section) => Object.freeze({
-            title: section.title,
-            tasks: tasks.filter((task) => task.projectId === project.id && task.sectionId === section.id)
-          }))
-        )
-      })
-    )
-  ]);
 
 const allMarkdownDocument = (
   projects: ReadonlyArray<Project>,
@@ -511,14 +471,6 @@ const copyText = async (text: string) => {
   textarea.select();
   document.execCommand("copy");
   textarea.remove();
-};
-
-const createZipBlob = async (files: ReadonlyArray<Readonly<{ name: string; content: string }>>) => {
-  const zip = new JSZip();
-
-  files.forEach((file) => zip.file(file.name, file.content));
-
-  return zip.generateAsync({ type: "blob" });
 };
 
 const downloadBlob = (blob: Blob, filename: string) => {
@@ -569,7 +521,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const [editTaskId, setEditTaskId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [editPlacement, setEditPlacement] = useState(inboxPlacement);
-  const [markdownModal, setMarkdownModal] = useState<Readonly<{ title: string; markdown: string }> | null>(null);
+  const [markdownModal, setMarkdownModal] = useState<Readonly<{ title: string; markdown: string; format?: "markdown" | "json" }> | null>(null);
   const [detailsTaskId, setDetailsTaskId] = useState<TaskId | null>(null);
   const [detailTitle, setDetailTitle] = useState("");
   const [detailDescription, setDetailDescription] = useState("");
@@ -1194,12 +1146,12 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
       : targetProjectId !== null
         ? allProjects.find((project) => project.id === targetProjectId)?.title ?? "selected project"
         : "Inbox";
-  const pageMode = currentPath === "/dates" ? "dates" : currentPath === "/labels" ? "labels" : "tasks";
+  const pageMode = currentPath === "/dates" ? "dates" : currentPath === "/labels" ? "labels" : currentPath === "/export" ? "export" : "tasks";
   const selectedLabel = new URLSearchParams(window.location.search).get("label") ?? "";
   const viewTasks = pageMode === "dates"
     ? filterTaskTree(allTasks, (task) => Boolean(task.dueDate))
     : filterTaskTree(allTasks, (task) => task.labels.length > 0 && (!selectedLabel || task.labels.includes(selectedLabel)));
-  const viewTitle = pageMode === "dates" ? "Dates" : pageMode === "labels" ? (selectedLabel ? `Label: ${selectedLabel}` : "Labels") : targetProjectId === null ? "Inbox" : taskTargetLabel;
+  const viewTitle = pageMode === "dates" ? "Dates" : pageMode === "labels" ? (selectedLabel ? `Label: ${selectedLabel}` : "Labels") : pageMode === "export" ? "Export" : targetProjectId === null ? "Inbox" : taskTargetLabel;
   const markdown = currentMarkdown(taskTargetLabel, inboxRootTasks, allSections, allTasks, targetProjectId);
   const openAddTaskDialog = (placement: string) => {
     setAddTaskPlacement(placement);
@@ -1229,11 +1181,31 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     setActiveDropZone(null);
   };
 
-  const exportZip = async () => {
-    downloadBlob(await createZipBlob(allMarkdownFiles(allProjects, allSections, allTasks)), "todoist-clone-markdown.zip");
-  };
-
   const allMarkdown = allMarkdownDocument(allProjects, allSections, allTasks);
+  const allJson = JSON.stringify(Object.freeze({
+    schemaVersion: 1,
+    exportedAt: new Date().toISOString(),
+    inbox: Object.freeze({
+      description: inboxDescriptionQuery.data ?? "",
+      sections: allSections.filter((section) => section.projectId === null),
+      tasks: flatTasks.filter((task) => task.projectId === null)
+    }),
+    projects: allProjects.map((project) => Object.freeze({
+      ...project,
+      sections: allSections.filter((section) => section.projectId === project.id),
+      tasks: flatTasks.filter((task) => task.projectId === project.id)
+    })),
+    sections: allSections,
+    tasks: flatTasks,
+    taskTree: allTasks,
+    dates: flatTasks.filter((task) => task.dueDate !== null).map((task) => Object.freeze({ taskId: task.id, dueDate: task.dueDate })),
+    comments: flatTasks.flatMap((task) => task.comments.map((comment) => Object.freeze({ ...comment, taskId: task.id }))),
+    descriptions: Object.freeze({
+      inbox: inboxDescriptionQuery.data ?? "",
+      projects: allProjects.map((project) => Object.freeze({ id: project.id, description: project.description })),
+      tasks: flatTasks.filter((task) => task.description.length > 0).map((task) => Object.freeze({ id: task.id, description: task.description }))
+    })
+  }), null, 2);
 
   const exportMarkdown = () => {
     downloadBlob(new Blob([allMarkdown], { type: "text/markdown;charset=utf-8" }), "todoist-clone.md");
@@ -1267,6 +1239,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
         </button>
         <a className={clsx("nav-button nav-link-button", pageMode === "dates" && "active")} href="/dates"><CalendarDays size={16} aria-hidden="true" />Dates</a>
         <a className={clsx("nav-button nav-link-button", pageMode === "labels" && "active")} href="/labels"><Tag size={16} aria-hidden="true" />Labels</a>
+        <a className={clsx("nav-button nav-link-button", pageMode === "export" && "active")} href="/export"><Download size={16} aria-hidden="true" />Export</a>
         {toolsEnabled ? (
           <a className="nav-button nav-link-button" href="/tools">
             <Code2 size={16} aria-hidden="true" />
@@ -1341,26 +1314,6 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
             <div><button type="submit" className="btn-primary">Save</button><button type="button" onClick={cancelProjectCreate}>Cancel</button></div>
           </form> : <button type="button" className="add-project-trigger" onClick={() => { setProjectTitle(""); setAddingProject(true); }}><Plus size={16} aria-hidden="true" />Add project</button>}
         </div>
-        {pageMode === "tasks" ? <><button type="button" className="nav-button sidebar-export" onClick={exportZip}>
-          <Archive size={16} aria-hidden="true" />
-          Export all ZIP
-        </button>
-        <button type="button" className="nav-button sidebar-export" onClick={exportMarkdown}>
-          <Download size={16} aria-hidden="true" />
-          Export all markdown
-        </button>
-        <button type="button" className="nav-button sidebar-export" onClick={async () => { await copyText(allMarkdown); setCopyStatus("All markdown copied"); }}>
-          <ClipboardCopy size={16} aria-hidden="true" />
-          Copy all markdown
-        </button>
-        <button
-          type="button"
-          className="nav-button sidebar-export"
-          onClick={() => setMarkdownModal(Object.freeze({ title: "All tasks", markdown: allMarkdown }))}
-        >
-          <Eye size={16} aria-hidden="true" />
-          Preview all markdown
-        </button></> : null}
       </aside>
 
       <section className="workspace card shadow-sm" aria-label="Task manager">
@@ -1385,11 +1338,31 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
 
         {tasks.isLoading ? <p className="muted">Loading tasks...</p> : null}
         {tasks.isError ? <p className="error">Unable to load tasks.</p> : null}
-        {pageMode !== "tasks" ? (
+        {pageMode === "dates" || pageMode === "labels" ? (
           <section className="drop-zone task-filter-page" aria-label={`${viewTitle} tasks`}>
             {pageMode === "dates" ? <div className="date-view-switch" aria-label="Date view"><button type="button" aria-pressed={dateView === "list"} onClick={() => setDateView("list")}>List</button><button type="button" aria-pressed={dateView === "calendar"} onClick={() => setDateView("calendar")}>Calendar</button></div> : null}
             {pageMode === "labels" ? <nav className="label-filter-list" aria-label="Filter by label"><a className={!selectedLabel ? "active" : ""} href="/labels">All labels</a>{Array.from(new Set(flatTasks.flatMap((task) => task.labels))).sort().map((label) => <a key={label} className={selectedLabel === label ? "active" : ""} href={`/labels?label=${encodeURIComponent(label)}`}>{label}</a>)}</nav> : null}
             {pageMode === "dates" && dateView === "calendar" ? <><div className="calendar-month-control"><button type="button" aria-label="Previous month" onClick={() => setCalendarMonth((month) => { const date = new Date(`${month}-01T00:00:00Z`); date.setUTCMonth(date.getUTCMonth() - 1); return date.toISOString().slice(0, 7); })}>‹</button><label>Month<input aria-label="Calendar month" type="month" value={calendarMonth} onChange={(event) => setCalendarMonth(event.target.value)} /></label><button type="button" aria-label="Next month" onClick={() => setCalendarMonth((month) => { const date = new Date(`${month}-01T00:00:00Z`); date.setUTCMonth(date.getUTCMonth() + 1); return date.toISOString().slice(0, 7); })}>›</button></div><div className="dates-calendar" aria-label="Calendar view">{Array.from({ length: new Date(Number(calendarMonth.slice(0, 4)), Number(calendarMonth.slice(5, 7)), 0).getDate() }, (_, index) => index + 1).map((day) => { const date = `${calendarMonth}-${String(day).padStart(2, "0")}`; const matching = viewTasks.filter((task) => task.dueDate === date); return <section key={day} className={clsx("dates-calendar-day", activeCalendarDate === date && "calendar-drop-active")} aria-label={`Tasks for ${date}`} onDragOver={markCalendarDate(date)} onDragLeave={() => setActiveCalendarDate(null)} onDrop={dropTaskOnCalendarDate(date)}><h2>{day}</h2>{matching.map((task) => <button type="button" key={task.id} draggable onDragStart={(event) => { setDraggingTaskId(task.id); event.dataTransfer.setData("text/task-id", task.id); event.dataTransfer.effectAllowed = "move"; }} onDragEnd={() => { setDraggingTaskId(null); setActiveCalendarDate(null); }} onClick={() => { const node = findTaskNode(allTasks, task.id); if (node) openDetails(node); }}>{task.title}</button>)}</section>; })}</div></> : viewTasks.length > 0 ? renderTaskNodes(viewTasks, taskActions) : <p className="empty">{pageMode === "dates" ? "No dated tasks yet." : "No tasks with this label."}</p>}
+          </section>
+        ) : pageMode === "export" ? (
+          <section className="export-page" aria-label="Export data">
+            <section className="card export-format-card" aria-labelledby="markdown-export-title">
+              <div><h2 id="markdown-export-title">Markdown</h2><p>Human-readable task lists organized by Inbox, projects, and sections.</p></div>
+              <div className="export-format-actions">
+                <button type="button" className="btn-primary" onClick={exportMarkdown}><Download size={16} aria-hidden="true" />Export all markdown</button>
+                <button type="button" onClick={async () => { await copyText(allMarkdown); setCopyStatus("All markdown copied"); }}><ClipboardCopy size={16} aria-hidden="true" />Copy all markdown</button>
+                <button type="button" onClick={() => setMarkdownModal(Object.freeze({ title: "All tasks", markdown: allMarkdown, format: "markdown" }))}><Eye size={16} aria-hidden="true" />Preview all markdown</button>
+              </div>
+            </section>
+            <section className="card export-format-card" aria-labelledby="json-export-title">
+              <div><h2 id="json-export-title">JSON</h2><p>Complete structured data, including descriptions, dates, sections, task hierarchy, labels, comments, and archived projects.</p></div>
+              <div className="export-format-actions">
+                <button type="button" className="btn-primary" onClick={() => downloadBlob(new Blob([allJson], { type: "application/json;charset=utf-8" }), "todoist-clone.json")}><Download size={16} aria-hidden="true" />Export all JSON</button>
+                <button type="button" onClick={async () => { await copyText(allJson); setCopyStatus("All JSON copied"); }}><ClipboardCopy size={16} aria-hidden="true" />Copy all JSON</button>
+                <button type="button" onClick={() => setMarkdownModal(Object.freeze({ title: "All data", markdown: allJson, format: "json" }))}><Eye size={16} aria-hidden="true" />Preview all JSON</button>
+              </div>
+            </section>
+            {copyStatus.length > 0 ? <p className="muted" role="status">{copyStatus}</p> : null}
           </section>
         ) : targetProjectId === null ? (
           <div className="board">
@@ -1521,7 +1494,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
             className="markdown-modal"
             role="dialog"
             aria-modal="true"
-            aria-label="Markdown preview"
+            aria-label={markdownModal.format === "json" ? "JSON preview" : "Markdown preview"}
             onKeyDown={(event) => {
               if (event.key === "Escape") {
                 setMarkdownModal(null);
@@ -1529,7 +1502,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
             }}
           >
             <header className="markdown-modal-header">
-              <h2>{markdownModal.title} markdown</h2>
+              <h2>{markdownModal.title} {markdownModal.format ?? "markdown"}</h2>
               <button type="button" onClick={() => setMarkdownModal(null)}>
                 <X size={16} aria-hidden="true" />
                 Close
@@ -1611,7 +1584,6 @@ export const ToolsPage = ({ api, navigationApi }: Readonly<{ api: ToolsApi; navi
   const [selectedTable, setSelectedTable] = useState("");
   useEffect(() => { const openQuickAdd = (event: globalThis.KeyboardEvent) => { const target = event.target; const typing = target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)); if (!typing && !event.ctrlKey && !event.metaKey && !event.altKey && ["q", "й"].includes(event.key.toLocaleLowerCase())) window.location.href = "/?addTask=1"; }; window.addEventListener("keydown", openQuickAdd); return () => window.removeEventListener("keydown", openQuickAdd); }, []);
   const [projectTitle, setProjectTitle] = useState("");
-  const [markdownPreview, setMarkdownPreview] = useState(false);
   const [sql, setSql] = useState("SELECT * FROM tasks ORDER BY lexical_order;");
   const [result, setResult] = useState<unknown>(Object.freeze({ ready: true }));
   const [recordsLimit, setRecordsLimit] = useState<"10" | "100" | "all">("10");
@@ -1685,6 +1657,7 @@ export const ToolsPage = ({ api, navigationApi }: Readonly<{ api: ToolsApi; navi
         </a>
         <a className="nav-button nav-link-button" href="/dates"><CalendarDays size={16} aria-hidden="true" />Dates</a>
         <a className="nav-button nav-link-button" href="/labels"><Tag size={16} aria-hidden="true" />Labels</a>
+        <a className="nav-button nav-link-button" href="/export"><Download size={16} aria-hidden="true" />Export</a>
         <a className="nav-button nav-link-button active" href="/tools">
           <Code2 size={16} aria-hidden="true" />
           Tools
@@ -1696,7 +1669,6 @@ export const ToolsPage = ({ api, navigationApi }: Readonly<{ api: ToolsApi; navi
         <a className="nav-button nav-link-button" href="/archived-projects"><Archive size={16} aria-hidden="true" /> Archived projects</a>
         <div className="sidebar-group"><h2>My Projects</h2>{(projects.data ?? []).filter((project) => !project.archived).map((project) => <a className="nav-button nav-link-button project-tool-link" key={project.id} title={project.title} href={`/?project=${encodeURIComponent(project.id)}`}># <span>{project.title}</span></a>)}</div>
         {navigationApi ? <div className="card bg-light border p-3 sidebar-create-block"><form className="compact-form m-0" onSubmit={async (event) => { event.preventDefault(); const nextTitle = projectTitle.trim(); if (!nextTitle) return; await navigationApi.createProject(nextTitle); setProjectTitle(""); await queryClient.invalidateQueries({ queryKey: projectQueryKey }); }}><label htmlFor="tools-project-title">Project title</label><input id="tools-project-title" value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} /><button type="submit"><Plus size={16} aria-hidden="true" />Add project</button></form></div> : null}
-        {navigationApi ? <><button type="button" className="nav-button sidebar-export" onClick={async () => downloadBlob(await createZipBlob(allMarkdownFiles(projects.data ?? [], navigationSections.data ?? [], taskTree.data ?? [])), "todoist-clone-markdown.zip")}><Archive size={16} aria-hidden="true" />Export all ZIP</button><button type="button" className="nav-button sidebar-export" onClick={() => downloadBlob(new Blob([allMarkdownFiles(projects.data ?? [], navigationSections.data ?? [], taskTree.data ?? []).map((file) => file.content).join("\n\n---\n\n")], { type: "text/markdown;charset=utf-8" }), "todoist-clone.md")}><Download size={16} aria-hidden="true" />Export all markdown</button><button type="button" className="nav-button sidebar-export" onClick={async () => { await copyText(allMarkdownFiles(projects.data ?? [], navigationSections.data ?? [], taskTree.data ?? []).map((file) => file.content).join("\n\n---\n\n")); setResult("All markdown copied"); }}><ClipboardCopy size={16} aria-hidden="true" />Copy all markdown</button><button type="button" className="nav-button sidebar-export" onClick={() => setMarkdownPreview(true)}><Eye size={16} aria-hidden="true" />Preview all markdown</button></> : null}
       </aside>
       <section className="workspace card shadow-sm tools-panel" aria-label="Database tools">
         <header className="header">
@@ -1749,7 +1721,6 @@ export const ToolsPage = ({ api, navigationApi }: Readonly<{ api: ToolsApi; navi
 
         <section className="card tools-result-card"><header><h2>Result</h2><span>{runQuery.isPending || viewRecords.isPending ? "Loading" : "Ready"}</span></header><pre className="query-result">{JSON.stringify(result, null, 2)}</pre></section>
       </section>
-      {markdownPreview ? <div className="markdown-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setMarkdownPreview(false); }}><section className="markdown-modal" role="dialog" aria-modal="true" aria-label="Markdown preview"><header className="markdown-modal-header"><h2>All tasks markdown</h2><button type="button" className="btn btn-outline-secondary" onClick={() => setMarkdownPreview(false)}><X size={16} aria-hidden="true" />Close</button></header><pre>{allMarkdownFiles(projects.data ?? [], navigationSections.data ?? [], taskTree.data ?? []).map((file) => file.content).join("\n\n---\n\n")}</pre></section></div> : null}
     </main>
   );
 };
@@ -1757,7 +1728,6 @@ export const ToolsPage = ({ api, navigationApi }: Readonly<{ api: ToolsApi; navi
 export const SettingsPage = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const queryClient = useQueryClient();
   const [navigationProjectTitle, setNavigationProjectTitle] = useState("");
-  const [settingsPreviewOpen, setSettingsPreviewOpen] = useState(false);
   const settings = useQuery({ queryKey: settingsQueryKey, queryFn: api.getSettings });
   const authStatus = useQuery({ queryKey: authStatusQueryKey, queryFn: api.getAuthStatus });
   const [confirmDelete, setConfirmDelete] = useState(true);
@@ -1811,12 +1781,12 @@ export const SettingsPage = ({ api }: Readonly<{ api: ApplicationApi }>) => {
         <a className="nav-button nav-link-button" href="/"><Inbox size={16} aria-hidden="true" />Inbox</a>
         <a className="nav-button nav-link-button" href="/dates"><CalendarDays size={16} aria-hidden="true" />Dates</a>
         <a className="nav-button nav-link-button" href="/labels"><Tag size={16} aria-hidden="true" />Labels</a>
+        <a className="nav-button nav-link-button" href="/export"><Download size={16} aria-hidden="true" />Export</a>
         {toolsEnabled ? <a className="nav-button nav-link-button" href="/tools"><Code2 size={16} aria-hidden="true" />Tools</a> : null}
         <a className="nav-button nav-link-button active" href="/settings"><Settings size={16} aria-hidden="true" />Settings</a>
         <a className="nav-button nav-link-button" href="/archived-projects"><Archive size={16} aria-hidden="true" />Archived projects</a>
         <div className="sidebar-group"><h2>My Projects</h2>{(projects.data ?? []).filter((project) => !project.archived).map((project) => <a className="nav-button nav-link-button project-tool-link" key={project.id} href={`/?project=${encodeURIComponent(project.id)}`}># <span>{project.title}</span></a>)}</div>
         <div className="card bg-light border p-3 sidebar-create-block"><form className="compact-form m-0" onSubmit={async (event) => { event.preventDefault(); const value = navigationProjectTitle.trim(); if (!value) return; await api.createProject(value); setNavigationProjectTitle(""); await queryClient.invalidateQueries({ queryKey: projectQueryKey }); }}><label htmlFor="settings-project-title">Project title</label><input id="settings-project-title" value={navigationProjectTitle} onChange={(event) => setNavigationProjectTitle(event.target.value)} /><button type="submit"><Plus size={16} aria-hidden="true" />Add project</button></form></div>
-        <div className="sidebar-settings-exports"><button type="button" onClick={async () => downloadBlob(await createZipBlob(allMarkdownFiles(projects.data ?? [], sections.data ?? [], tasks.data ?? [])), "todoist-clone-markdown.zip")}><Archive size={16} aria-hidden="true" />Export all ZIP</button><button type="button" onClick={() => downloadBlob(new Blob([allMarkdownFiles(projects.data ?? [], sections.data ?? [], tasks.data ?? []).map((file) => file.content).join("\n\n---\n\n")], { type: "text/markdown;charset=utf-8" }), "todoist-clone.md")}><Download size={16} aria-hidden="true" />Export all markdown</button><button type="button" onClick={async () => { await copyText(allMarkdownFiles(projects.data ?? [], sections.data ?? [], tasks.data ?? []).map((file) => file.content).join("\n\n---\n\n")); }}><ClipboardCopy size={16} aria-hidden="true" />Copy all markdown</button><button type="button" onClick={() => setSettingsPreviewOpen(true)}><Eye size={16} aria-hidden="true" />Preview all markdown</button></div>
       </aside>
       <section className="workspace card shadow-sm settings-panel" aria-label="Settings">
         <header className="header">
@@ -1904,7 +1874,6 @@ export const SettingsPage = ({ api }: Readonly<{ api: ApplicationApi }>) => {
           </form>
         ) : null}
       </section>
-      {settingsPreviewOpen ? <div className="markdown-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSettingsPreviewOpen(false); }}><section className="markdown-modal" role="dialog" aria-modal="true" aria-label="Markdown preview" onKeyDown={(event) => { if (event.key === "Escape") setSettingsPreviewOpen(false); }}><header className="markdown-modal-header"><h2>All tasks markdown</h2><button type="button" onClick={() => setSettingsPreviewOpen(false)}><X size={16} aria-hidden="true" />Close</button></header><pre>{allMarkdownFiles(projects.data ?? [], sections.data ?? [], tasks.data ?? []).map((file) => file.content).join("\n\n---\n\n")}</pre></section></div> : null}
     </main>
   );
 };
@@ -1926,7 +1895,7 @@ export const ArchivedProjectsPage = ({ api }: Readonly<{ api: ApplicationApi }>)
   const selectedProject = archived.find((project) => project.id === selectedProjectId);
   const archivedTaskRoots = (tasks.data ?? []).filter((task) => task.projectId === selectedProjectId && task.parentId === null);
   return <main className="shell app-layout">
-    <aside className="sidebar card shadow-sm" aria-label="Navigation"><div className="sidebar-brand"><span className="brand-mark">T</span><strong>Todoist Clone</strong></div><a className="nav-button nav-link-button" href="/"><Inbox size={16} /> Inbox</a><a className="nav-button nav-link-button active" href="/archived-projects"><Archive size={16} /> Archived projects</a></aside>
+    <aside className="sidebar card shadow-sm" aria-label="Navigation"><div className="sidebar-brand"><span className="brand-mark">T</span><strong>Todoist Clone</strong></div><a className="nav-button nav-link-button" href="/"><Inbox size={16} /> Inbox</a><a className="nav-button nav-link-button" href="/export"><Download size={16} /> Export</a><a className="nav-button nav-link-button active" href="/archived-projects"><Archive size={16} /> Archived projects</a></aside>
     <section className="workspace card shadow-sm"><h1>Archived projects</h1>
       {archived.length === 0 ? <p className="empty">No archived projects.</p> : archived.map((project) => <article className="archived-project" key={project.id}><strong>{project.title}</strong><div><button type="button" onClick={() => setSelectedProjectId((current) => current === project.id ? null : project.id)}>{selectedProjectId === project.id ? "Hide tasks" : "View tasks"}</button><button type="button" onClick={() => void restore(project)}>Restore</button><button type="button" className="danger" onClick={() => void remove(project)}>Delete</button></div></article>)}
       {selectedProject !== undefined ? <section className="archived-task-view" aria-label={`${selectedProject.title} tasks`}><h2>{selectedProject.title} tasks</h2>{tasks.isLoading ? <p>Loading tasks…</p> : archivedTaskRoots.length === 0 ? <p className="empty">This project has no tasks.</p> : renderTasks(archivedTaskRoots)}</section> : null}
