@@ -90,7 +90,11 @@ test("edits task details and copies all Markdown", async ({ context, page }) => 
   await expect(detailSubtaskTitle).toHaveJSProperty("tagName", "TEXTAREA");
   await detailSubtaskTitle.fill("Nested from details");
   await page.getByLabel("New subtask title").press("Enter");
-  await taskDialog.getByLabel("Project, section, or Inbox").selectOption({ label: `${projectTitle} / ${sectionTitle}` });
+  const locationPicker = taskDialog.getByLabel("Project, section, or Inbox");
+  const optionLabels = await locationPicker.locator("option").allTextContents();
+  expect(optionLabels).toEqual([...optionLabels].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }) || left.localeCompare(right)));
+  expect(optionLabels).toContain(`${projectTitle} / ${sectionTitle}`);
+  await locationPicker.selectOption({ label: `${projectTitle} / ${sectionTitle}` });
   await expect(taskDialog.locator(".task-details-header-path")).toContainText(sectionTitle);
   await expect(taskDialog.getByRole("link", { name: projectTitle, exact: true }).first()).toBeVisible();
   const projectHref = await taskDialog.getByRole("link", { name: projectTitle, exact: true }).first().getAttribute("href");

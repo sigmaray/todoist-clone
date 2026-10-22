@@ -201,8 +201,8 @@ describe("TaskApp", () => {
     const parent = task({ id: "parent-1", title: "Parent task", children: Object.freeze([task({ id: "child-1", title: "Child task", parentId: "parent-1" })]) });
     renderApp(Object.freeze({
       ...baseApi(Object.freeze([parent])),
-      listProjects: async () => Object.freeze([project({ id: "project-1", title: "Roadmap" })]),
-      listSections: async () => Object.freeze([section({ id: "section-1", title: "Next", projectId: "project-1" })]),
+      listProjects: async () => Object.freeze([project({ id: "project-1", title: "Roadmap" }), project({ id: "project-2", title: "Alpha" })]),
+      listSections: async () => Object.freeze([section({ id: "section-1", title: "Next", projectId: "project-1" }), section({ id: "section-2", title: "Back", projectId: "project-1" })]),
       moveTask
     }));
 
@@ -211,6 +211,7 @@ describe("TaskApp", () => {
     expect(within(dialog).getAllByRole("link", { name: "Inbox" })[0]).toHaveAttribute("href", "/");
     expect(within(dialog).getByRole("link", { name: "Parent task" })).toHaveAttribute("href", "/?task=parent-1");
     const locationPicker = within(dialog).getByLabelText("Project, section, or Inbox");
+    expect(within(locationPicker).getAllByRole("option").map((option) => option.textContent)).toEqual(["Alpha", "Inbox", "Roadmap", "Roadmap / Back", "Roadmap / Next"]);
     await userEvent.selectOptions(locationPicker, "project:project-1");
     await waitFor(() => expect(moveTask).toHaveBeenCalledWith("child-1", "project-1", null, null, null, null));
     expect(locationPicker).toHaveValue("project:project-1");

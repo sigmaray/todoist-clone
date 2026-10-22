@@ -249,7 +249,7 @@ const createPlacementOptions = (
       return Object.freeze({ value: sectionPlacement(section.id), label: `${projectTitle} / ${section.title}` });
     }),
     ...projects.map((project) => Object.freeze({ value: projectPlacement(project.id), label: project.title }))
-  ]);
+  ].sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: "base" }) || left.value.localeCompare(right.value)));
 
 const appendById = <TItem extends Readonly<{ id: string }>>(
   items: ReadonlyArray<TItem> | undefined,
