@@ -19,17 +19,40 @@ const createProject = (page: Page) => async (title: string) => {
 };
 
 const dragProjectTo = (page: Page) => async (sourceTitle: string, targetTitle: string, yRatio: number) => {
-  await page.locator(".project-nav-row").filter({ has: page.getByRole("button", { name: sourceTitle, exact: true }) }).evaluate(async (source, data) => {
-    const target = [...document.querySelectorAll(".project-nav-row")].find((row) => row.textContent?.includes(data.targetTitle));
+  await page.locator(".project-nav-row").filter({ has: page.getByRole("button", { name: sourceTitle, exact: true }) }).evaluate((source, data) => {
+    const target = [...document.querySelectorAll<HTMLElement>(".project-nav-row")].find((row) => row.querySelector("button.nav-button")?.textContent?.trim() === data.targetTitle);
     if (!target) throw new Error("Project target not found");
     const rect = target.getBoundingClientRect();
     const y = rect.top + rect.height * data.yRatio;
     const transfer = new DataTransfer();
     transfer.setData("application/x-project-id", source.getAttribute("data-project-id") ?? "");
     source.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: transfer }));
+    target.dispatchEvent(new DragEvent("dragenter", { bubbles: true, dataTransfer: transfer, clientY: y }));
     target.dispatchEvent(new DragEvent("dragover", { bubbles: true, dataTransfer: transfer, clientY: y }));
     target.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer: transfer, clientY: y }));
     source.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer: transfer }));
+  }, { targetTitle, yRatio });
+};
+const dragProjectWithMouse = (page: Page) => async (sourceTitle: string, targetTitle: string, yRatio: number) => {
+  const source = page.locator(".project-nav-row").filter({ has: page.getByRole("button", { name: sourceTitle, exact: true }) });
+  const target = page.locator(".project-nav-row").filter({ has: page.getByRole("button", { name: targetTitle, exact: true }) });
+  const box = await target.boundingBox();
+  if (!box) throw new Error("Project target is not visible");
+  await source.dragTo(target, { targetPosition: { x: Math.max(8, Math.min(box.width - 8, box.width / 2)), y: Math.max(2, Math.min(box.height - 2, box.height * yRatio)) } });
+};
+
+const showProjectDropIndicator = (page: Page) => async (sourceTitle: string, targetTitle: string, yRatio: number) => {
+  await page.locator(".project-nav-row").filter({ has: page.getByRole("button", { name: sourceTitle, exact: true }) }).evaluate((source, data) => {
+    const target = [...document.querySelectorAll<HTMLElement>(".project-nav-row")].find((row) => row.querySelector("button.nav-button")?.textContent?.trim() === data.targetTitle);
+    if (!target) throw new Error("Project target not found");
+    const rect = target.getBoundingClientRect();
+    const transfer = new DataTransfer();
+    transfer.setData("application/x-project-id", source.getAttribute("data-project-id") ?? "");
+    const y = rect.top + rect.height * data.yRatio;
+    source.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: transfer }));
+    target.dispatchEvent(new DragEvent("dragover", { bubbles: true, dataTransfer: transfer, clientY: y }));
+    const child = target.querySelector("button.nav-button");
+    child?.dispatchEvent(new DragEvent("dragleave", { bubbles: true, dataTransfer: transfer, relatedTarget: target }));
   }, { targetTitle, yRatio });
 };
 
@@ -410,4 +433,75 @@ test("creates subprojects and drags projects into and out of a parent", async ({
   await expect(page.locator(".project-nav-row").filter({ hasText: grandchild })).toHaveCSS("padding-inline-start", "18px");
   await dragProjectTo(page)(grandchild, root, 0.1);
   await expect(page.locator(".project-nav-row").filter({ hasText: grandchild })).toHaveCSS("padding-inline-start", "0px");
+  await page.reload();
+  await expect(page.locator(".project-nav-row").filter({ has: page.getByRole("button", { name: grandchild, exact: true }) })).toHaveCSS("padding-inline-start", "0px");
+});
+
+test("reorders projects reliably before and after siblings and persists the order", async ({ page }, testInfo) => {
+  const suffix = `${Date.now()}-${testInfo.workerIndex}`;
+  const first = `Drag first ${suffix}`;
+  const middle = `Drag middle ${suffix}`;
+  const last = `Drag last ${suffix}`;
+  await page.goto("/");
+  await createProject(page)(first);
+  await createProject(page)(middle);
+  await createProject(page)(last);
+  await dragProjectTo(page)(last, first, 0.1);
+  await expect.poll(() => page.locator(".project-nav-row").evaluateAll((rows) => rows.map((row) => row.querySelector("button.nav-button")?.textContent?.trim()))).toContain(first);
+  const order = async () => page.locator(".project-nav-row").evaluateAll((rows) => rows.map((row) => row.querySelector("button.nav-button")?.textContent?.trim()));
+  await expect.poll(async () => {
+    const rows = await order();
+    return rows.indexOf(last) < rows.indexOf(first) && rows.indexOf(first) < rows.indexOf(middle);
+  }).toBe(true);
+  await dragProjectTo(page)(last, middle, 0.9);
+  await expect.poll(async () => {
+    const rows = await order();
+    return rows.indexOf(first) < rows.indexOf(middle) && rows.indexOf(middle) < rows.indexOf(last);
+  }).toBe(true);
+  await page.reload();
+  await expect.poll(async () => {
+    const rows = await order();
+    return rows.indexOf(first) < rows.indexOf(middle) && rows.indexOf(middle) < rows.indexOf(last);
+  }).toBe(true);
+});
+
+test("keeps project drop feedback stable and blocks dragging a project into its descendant", async ({ page }, testInfo) => {
+  const suffix = `${Date.now()}-${testInfo.workerIndex}`;
+  const parent = `Drag parent ${suffix}`;
+  const child = `Drag child ${suffix}`;
+  const peer = `Drag peer ${suffix}`;
+  await page.goto("/");
+  await createProject(page)(parent);
+  await createProject(page)(peer);
+  await page.locator(`summary[aria-label="Project menu ${parent}"]`).click();
+  await page.getByRole("button", { name: "＋ Add subproject" }).click();
+  await page.getByLabel("Project title").fill(child);
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await showProjectDropIndicator(page)(peer, parent, 0.5);
+  await expect(page.locator(`.project-nav-row[data-project-id]`).filter({ has: page.getByRole("button", { name: parent, exact: true }) })).toHaveClass(/project-drop-inside/);
+  await dragProjectTo(page)(peer, parent, 0.5);
+  await expect(page.locator(".project-nav-row").filter({ has: page.getByRole("button", { name: peer, exact: true }) })).toHaveCSS("padding-inline-start", "18px");
+  await dragProjectTo(page)(parent, child, 0.5);
+  await expect(page.locator(".project-nav-row").filter({ has: page.getByRole("button", { name: parent, exact: true }) })).toHaveCSS("padding-inline-start", "0px");
+  await expect(page.locator(".project-nav-row").filter({ has: page.getByRole("button", { name: child, exact: true }) })).toHaveCSS("padding-inline-start", "18px");
+});
+
+test("supports real mouse dragging of project rows", async ({ page }, testInfo) => {
+  const suffix = `${Date.now()}-${testInfo.workerIndex}`;
+  const first = `Mouse drag first ${suffix}`;
+  const second = `Mouse drag second ${suffix}`;
+  await page.goto("/");
+  await createProject(page)(first);
+  await createProject(page)(second);
+  await dragProjectWithMouse(page)(second, first, 0.1);
+  const rows = async () => page.locator(".project-nav-row").evaluateAll((items) => items.map((row) => row.querySelector("button.nav-button")?.textContent?.trim()));
+  await expect.poll(async () => {
+    const order = await rows();
+    return order.indexOf(second) < order.indexOf(first);
+  }).toBe(true);
+  await page.reload();
+  await expect.poll(async () => {
+    const order = await rows();
+    return order.indexOf(second) < order.indexOf(first);
+  }).toBe(true);
 });

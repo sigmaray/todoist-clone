@@ -231,8 +231,18 @@ const projectDepth = (projects: ReadonlyArray<Project>, project: Project): numbe
   }
   return depth;
 };
+const isProjectWithinTree = (projects: ReadonlyArray<Project>, projectId: ProjectId | null, ancestorId: ProjectId): boolean => {
+  let currentId = projectId;
+  let remaining = projects.length;
+  while (currentId !== null && remaining > 0) {
+    if (currentId === ancestorId) return true;
+    currentId = projects.find((item) => item.id === currentId)?.parentId ?? null;
+    remaining -= 1;
+  }
+  return false;
+};
 const projectTreeOrder = (projects: ReadonlyArray<Project>): ReadonlyArray<Project> => {
-  const byParent = (parentId: ProjectId | null) => projects.filter((item) => item.parentId === parentId || (parentId === null && item.parentId !== null && !projects.some((parent) => parent.id === item.parentId))).toSorted((a, b) => a.lexicalOrder.localeCompare(b.lexicalOrder));
+  const byParent = (parentId: ProjectId | null) => projects.filter((item) => item.parentId === parentId || (parentId === null && item.parentId !== null && !projects.some((parent) => parent.id === item.parentId))).toSorted((a, b) => a.lexicalOrder < b.lexicalOrder ? -1 : a.lexicalOrder > b.lexicalOrder ? 1 : 0);
   const visit = (parentId: ProjectId | null): ReadonlyArray<Project> => byParent(parentId).flatMap((project) => [project, ...visit(project.id)]);
   return Object.freeze(visit(null));
 };
@@ -931,18 +941,30 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   };
   const markProjectDrop = (project: Project) => (event: DragEvent<HTMLElement>) => {
     if (!event.dataTransfer.types.includes("application/x-project-id")) return;
+    const draggedId = event.dataTransfer.getData("application/x-project-id") || draggingProjectId;
+    const position = (() => {
+      const rect = event.currentTarget.getBoundingClientRect();
+      const relativeY = rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0.5;
+      return relativeY < 0.28 ? "before" : relativeY > 0.72 ? "after" : "inside";
+    })();
+    const destinationParentId = position === "inside" ? project.id : project.parentId;
+    if (!draggedId || draggedId === project.id || isProjectWithinTree(activeProjects, destinationParentId, draggedId)) {
+      setActiveProjectDrop(null);
+      return;
+    }
     event.preventDefault();
-    const rect = event.currentTarget.getBoundingClientRect();
-    const relativeY = (event.clientY - rect.top) / rect.height;
-    setActiveProjectDrop(Object.freeze({ id: project.id, position: relativeY < 0.32 ? "before" : relativeY > 0.68 ? "after" : "inside" }));
+    setActiveProjectDrop(Object.freeze({ id: project.id, position }));
   };
   const dropProject = (project: Project) => (event: DragEvent<HTMLElement>) => {
     const draggedId = event.dataTransfer.getData("application/x-project-id");
     if (!draggedId || draggedId === project.id) return;
-    event.preventDefault();
     const rect = event.currentTarget.getBoundingClientRect();
-    const relativeY = (event.clientY - rect.top) / rect.height;
-    const position = relativeY < 0.32 ? "before" : relativeY > 0.68 ? "after" : "inside";
+    const relativeY = rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0.5;
+    const position = relativeY < 0.28 ? "before" : relativeY > 0.72 ? "after" : "inside";
+    const destinationParentId = position === "inside" ? project.id : project.parentId;
+    if (isProjectWithinTree(activeProjects, destinationParentId, draggedId)) return;
+    event.preventDefault();
+    event.stopPropagation();
     if (position === "inside") {
       setActiveProjectDrop(null); setDraggingProjectId(null); setActiveDropZone(null);
       moveProjectMutation.mutate({ id: draggedId, parentId: project.id });
@@ -956,7 +978,9 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     setActiveProjectDrop(null);
     setDraggingProjectId(null);
     setActiveDropZone(null);
-    void api.moveProject(draggedId, project.parentId).then(() => reorderProjectMutation.mutate({ id: draggedId, beforeId, afterId }));
+    void moveProjectMutation.mutateAsync({ id: draggedId, parentId: project.parentId })
+      .then(() => reorderProjectMutation.mutateAsync({ id: draggedId, beforeId, afterId }))
+      .catch(() => queryClient.invalidateQueries({ queryKey: projectQueryKey }));
   };
   const dropTaskOnCalendarDate = (date: string) => (event: DragEvent<HTMLElement>) => {
     const taskId = event.dataTransfer.getData("text/task-id");
@@ -1328,7 +1352,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
                 </button>
               </form>
             ) : (
-              <div key={project.id} data-project-id={project.id} style={{ paddingInlineStart: `${Math.min(projectDepth(activeProjects, project), 8) * 18}px` }} className={clsx("project-nav-row", draggingProjectId === project.id && "project-dragging", activeProjectDrop?.id === project.id && `project-drop-${activeProjectDrop.position}`)} draggable onDragStart={(event) => { setActiveDropZone(null); setActiveProjectDrop(null); setDraggingProjectId(project.id); event.dataTransfer.setData("application/x-project-id", project.id); event.dataTransfer.effectAllowed = "move"; }} onDragEnd={() => { setDraggingProjectId(null); setActiveProjectDrop(null); setActiveDropZone(null); }} onDragOver={markProjectDrop(project)} onDragLeave={() => setActiveProjectDrop(null)} onDrop={dropProject(project)}>
+              <div key={project.id} data-project-id={project.id} style={{ paddingInlineStart: `${Math.min(projectDepth(activeProjects, project), 8) * 18}px` }} className={clsx("project-nav-row", draggingProjectId === project.id && "project-dragging", activeProjectDrop?.id === project.id && `project-drop-${activeProjectDrop.position}`)} draggable onDragStart={(event) => { setActiveDropZone(null); setActiveProjectDrop(null); setDraggingProjectId(project.id); event.dataTransfer.setData("application/x-project-id", project.id); event.dataTransfer.effectAllowed = "move"; }} onDragEnd={() => { setDraggingProjectId(null); setActiveProjectDrop(null); setActiveDropZone(null); }} onDragOver={markProjectDrop(project)} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setActiveProjectDrop(null); }} onDrop={dropProject(project)}>
                 <button
                   type="button"
                   className={clsx(
