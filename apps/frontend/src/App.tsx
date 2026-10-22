@@ -12,8 +12,8 @@ import {
 } from "@todoist-clone/domain";
 import type { Project, ProjectId, Section, SectionId, Task, TaskId, TaskNode } from "@todoist-clone/domain";
 import clsx from "clsx";
-import { Archive, CalendarDays, ClipboardCopy, Code2, Copy, Database, Download, Edit3, Eye, Inbox, KeyRound, MoreHorizontal, Menu, Plus, Search, Settings, Tag, Trash2, X } from "lucide-react";
-import type { DragEvent, FormEvent, KeyboardEvent, ReactElement, UIEvent } from "react";
+import { Archive, CalendarDays, ClipboardCopy, Code2, Copy, Database, Download, Edit3, Eye, GripVertical, Inbox, KeyRound, MoreHorizontal, Menu, Plus, Search, Settings, Tag, Trash2, X } from "lucide-react";
+import type { DragEvent, FormEvent, KeyboardEvent, ReactElement, TouchEvent as ReactTouchEvent, UIEvent } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import "./vendor/bootstrap.min.css";
@@ -31,6 +31,7 @@ const authStatusQueryKey = Object.freeze(["auth-status"]);
 const toolsEnabled = import.meta.env.DEV || import.meta.env.MODE === "test";
 
 type DragPlacement = "before" | "inside" | "after" | "outdent";
+type MobileDragItem = Readonly<{ kind: "task" | "project"; id: string }>;
 
 type DropZoneId = "inbox" | `project:${ProjectId}` | `section:${SectionId}`;
 
@@ -87,6 +88,9 @@ const renderTaskNodes = (
     clearDragTarget: () => void;
     finishDragging: () => void;
     startDragging: (task: TaskNode) => (event: DragEvent<HTMLElement>) => void;
+    startMobileTaskDrag: (task: TaskNode) => (event: ReactTouchEvent<HTMLButtonElement>) => void;
+    moveMobileDrag: (event: ReactTouchEvent<HTMLButtonElement>) => void;
+    finishMobileDrag: (event: ReactTouchEvent<HTMLButtonElement>) => void;
     handleTaskKeys: (task: TaskNode) => (event: KeyboardEvent<HTMLElement>) => void;
     submitEdit: (task: TaskNode) => void;
     cancelEdit: () => void;
@@ -173,7 +177,7 @@ const renderTaskNodes = (
               </div>
             </form>
           ) : (
-            <><button type="button" className={task.completed ? "task-title completed" : "task-title"} onClick={() => actions.openDetails(task)}>{task.title}</button>{task.dueDate || task.labels.length > 0 ? <span className="task-meta-list">{task.dueDate ? <time dateTime={task.dueDate} title={`Due ${task.dueDate}`}>{task.dueDate}</time> : null}{task.labels.map((label) => <a className="task-label" key={label} href={`/labels?label=${encodeURIComponent(label)}`}>{label}</a>)}</span> : null}</>
+            <div className="task-content"><button type="button" className="mobile-task-drag-handle" aria-label={`Drag task ${task.title}`} onTouchStart={actions.startMobileTaskDrag(task)} onTouchMove={actions.moveMobileDrag} onTouchEnd={actions.finishMobileDrag}><GripVertical size={16} aria-hidden="true" /></button><button type="button" className={task.completed ? "task-title completed" : "task-title"} onClick={() => actions.openDetails(task)}>{task.title}</button>{task.dueDate || task.labels.length > 0 ? <span className="task-meta-list">{task.dueDate ? <time dateTime={task.dueDate} title={`Due ${task.dueDate}`}>{task.dueDate}</time> : null}{task.labels.map((label) => <a className="task-label" key={label} href={`/labels?label=${encodeURIComponent(label)}`}>{label}</a>)}</span> : null}</div>
           )}
           <button type="button" className="task-action" aria-label={`Edit task ${task.title}`} onClick={() => actions.startEditing(task)}>
             <Edit3 size={14} aria-hidden="true" />
@@ -559,6 +563,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const [activeDropZone, setActiveDropZone] = useState<DropZoneId | null>(null);
   const [activeProjectDrop, setActiveProjectDrop] = useState<Readonly<{ id: ProjectId; position: "before" | "after" | "inside" }> | null>(null);
   const [draggingProjectId, setDraggingProjectId] = useState<ProjectId | null>(null);
+  const mobileDragRef = useRef<MobileDragItem | null>(null);
   const [activeSectionDrop, setActiveSectionDrop] = useState<Readonly<{ id: SectionId; position: "before" | "after" }> | null>(null);
   const [draggingSectionId, setDraggingSectionId] = useState<SectionId | null>(null);
   const [targetProjectId, setTargetProjectId] = useState<ProjectId | null>(() => new URLSearchParams(window.location.search).get("project"));
@@ -997,6 +1002,133 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
       .then(() => reorderProjectMutation.mutateAsync({ id: draggedId, beforeId, afterId }))
       .catch(() => queryClient.invalidateQueries({ queryKey: projectQueryKey }));
   };
+  const startMobileTaskDrag = (task: TaskNode) => (event: ReactTouchEvent<HTMLButtonElement>) => {
+    if (event.touches.length !== 1) return;
+    event.preventDefault();
+    event.stopPropagation();
+    mobileDragRef.current = Object.freeze({ kind: "task", id: task.id });
+    setDraggingTaskId(task.id);
+    setActiveDragTarget(null);
+    setActiveDropZone(null);
+  };
+  const startMobileProjectDrag = (project: Project) => (event: ReactTouchEvent<HTMLButtonElement>) => {
+    if (event.touches.length !== 1) return;
+    event.preventDefault();
+    event.stopPropagation();
+    mobileDragRef.current = Object.freeze({ kind: "project", id: project.id });
+    setDraggingProjectId(project.id);
+    setActiveProjectDrop(null);
+  };
+  const moveMobileDrag = (event: ReactTouchEvent<HTMLButtonElement>) => {
+    const touch = event.touches[0];
+    const drag = mobileDragRef.current;
+    if (touch === undefined || drag === null) return;
+    event.preventDefault();
+    const target = document.elementFromPoint(touch.clientX, touch.clientY);
+    if (!(target instanceof Element)) return;
+    if (drag.kind === "task") {
+      const taskTarget = target.closest<HTMLElement>("[data-task-id]");
+      const sectionTarget = target.closest<HTMLElement>("[data-mobile-drop-section]");
+      const projectTarget = target.closest<HTMLElement>("[data-mobile-drop-project]");
+      if (taskTarget !== null) {
+        const targetTaskId = taskTarget.dataset.taskId ?? "";
+        const targetTask = findTaskNode(allTasks, targetTaskId);
+        const sourceTask = findTaskNode(allTasks, drag.id);
+        if (targetTask !== null && sourceTask !== null && targetTask.id !== sourceTask.id && !hasDescendant(sourceTask, targetTask.id)) {
+          const rect = taskTarget.getBoundingClientRect();
+          const ratio = rect.height > 0 ? (touch.clientY - rect.top) / rect.height : 0.5;
+          const placement = ratio < 0.3 ? "before" : ratio > 0.7 ? "after" : "inside";
+          setActiveDragTarget(Object.freeze({ taskId: targetTask.id, placement }));
+        } else setActiveDragTarget(null);
+        setActiveDropZone(null);
+      } else if (sectionTarget !== null) {
+        const sectionId = sectionTarget.dataset.mobileDropSection;
+        const section = allSections.find((item) => item.id === sectionId);
+        setActiveDragTarget(null);
+        if (section !== undefined) setActiveDropZone(dropZoneId(section.projectId, section.id));
+      } else if (projectTarget !== null) {
+        const projectId = projectTarget.dataset.mobileDropProject;
+        setActiveDragTarget(null);
+        setActiveDropZone(projectId === "inbox" ? inboxPlacement : projectId ? dropZoneId(projectId, null) : null);
+      } else {
+        setActiveDragTarget(null);
+        setActiveDropZone(null);
+      }
+    } else {
+      const projectRow = target.closest<HTMLElement>(".project-nav-row[data-project-id]");
+      const sourceProject = activeProjects.find((item) => item.id === drag.id);
+      const destination = activeProjects.find((item) => item.id === projectRow?.dataset.projectId);
+      if (sourceProject === undefined || destination === undefined || destination.id === sourceProject.id) {
+        setActiveProjectDrop(null);
+        return;
+      }
+      const rect = projectRow?.getBoundingClientRect();
+      const ratio = rect && rect.height > 0 ? (touch.clientY - rect.top) / rect.height : 0.5;
+      const position = ratio < 0.28 ? "before" : ratio > 0.72 ? "after" : "inside";
+      const parentId = position === "inside" ? destination.id : destination.parentId;
+      setActiveProjectDrop(isProjectWithinTree(activeProjects, parentId, sourceProject.id) ? null : Object.freeze({ id: destination.id, position }));
+    }
+  };
+
+  const finishMobileDrag = (event: ReactTouchEvent<HTMLButtonElement>) => {
+    const touch = event.changedTouches[0];
+    const drag = mobileDragRef.current;
+    mobileDragRef.current = null;
+    if (touch === undefined || drag === null) return;
+    const target = document.elementFromPoint(touch.clientX, touch.clientY);
+    if (target instanceof Element && drag.kind === "task") {
+      const moved = findTaskNode(allTasks, drag.id);
+      const taskTarget = target.closest<HTMLElement>("[data-task-id]");
+      const destinationSection = target.closest<HTMLElement>("[data-mobile-drop-section]");
+      const destinationProject = target.closest<HTMLElement>("[data-mobile-drop-project]");
+      if (moved !== null && taskTarget !== null) {
+        const targetTask = findTaskNode(allTasks, taskTarget.dataset.taskId ?? "");
+        if (targetTask !== null && targetTask.id !== moved.id && !hasDescendant(moved, targetTask.id)) {
+          const rect = taskTarget.getBoundingClientRect();
+          const ratio = rect.height > 0 ? (touch.clientY - rect.top) / rect.height : 0.5;
+          const placement = ratio < 0.3 ? "before" : ratio > 0.7 ? "after" : "inside";
+          const nextPlacement = placement === "inside"
+            ? Object.freeze({ parentId: targetTask.id, projectId: targetTask.projectId, sectionId: targetTask.sectionId, beforeId: null, afterId: null })
+            : computeDropPlacement(flatTasks, moved, targetTask, placement);
+          if (nextPlacement !== null) moveMutation.mutate(Object.freeze({ taskId: moved.id, ...nextPlacement }));
+        }
+      } else if (moved !== null && destinationSection !== null) {
+        moveMutation.mutate(Object.freeze({ taskId: moved.id, projectId: moved.projectId, sectionId: destinationSection.dataset.mobileDropSection ?? null, parentId: null, beforeId: null, afterId: null }));
+      } else if (moved !== null && destinationProject !== null) {
+        const projectId = destinationProject.dataset.mobileDropProject === "inbox" ? null : destinationProject.dataset.mobileDropProject ?? null;
+        moveMutation.mutate(Object.freeze({ taskId: moved.id, projectId, sectionId: null, parentId: null, beforeId: null, afterId: null }));
+      }
+    } else if (target instanceof Element && drag.kind === "project") {
+      const projectTargetRow = target.closest<HTMLElement>(".project-nav-row[data-project-id]");
+      const project = activeProjects.find((item) => item.id === drag.id);
+      const destination = activeProjects.find((item) => item.id === projectTargetRow?.dataset.projectId);
+      if (project !== undefined && destination !== undefined && project.id !== destination.id) {
+        const rect = projectTargetRow?.getBoundingClientRect();
+        const ratio = rect && rect.height > 0 ? (touch.clientY - rect.top) / rect.height : 0.5;
+        const position = ratio < 0.28 ? "before" : ratio > 0.72 ? "after" : "inside";
+        const parentId = position === "inside" ? destination.id : destination.parentId;
+        if (!isProjectWithinTree(activeProjects, parentId, project.id)) {
+          if (position === "inside") moveProjectMutation.mutate({ id: project.id, parentId });
+          else {
+            const siblings = activeProjects.filter((item) => item.parentId === destination.parentId);
+            const ordered = siblings.filter((item) => item.id !== project.id);
+            const index = ordered.findIndex((item) => item.id === destination.id);
+            const beforeId = position === "before" ? destination.id : ordered[index + 1]?.id ?? null;
+            const afterId = position === "before" ? ordered[index - 1]?.id ?? null : destination.id;
+            void moveProjectMutation.mutateAsync({ id: project.id, parentId: destination.parentId })
+              .then(() => reorderProjectMutation.mutateAsync({ id: project.id, beforeId, afterId }))
+              .catch(() => queryClient.invalidateQueries({ queryKey: projectQueryKey }));
+          }
+        }
+      }
+    }
+    setDraggingTaskId(null);
+    setActiveDragTarget(null);
+    setDraggingProjectId(null);
+    setActiveProjectDrop(null);
+    setActiveDropZone(null);
+  };
+
   const dropTaskOnCalendarDate = (date: string) => (event: DragEvent<HTMLElement>) => {
     const taskId = event.dataTransfer.getData("text/task-id");
     if (!taskId) return;
@@ -1183,6 +1315,9 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     openDetails,
     startSubtask,
     startDragging,
+    startMobileTaskDrag,
+    moveMobileDrag,
+    finishMobileDrag,
     deleteTask: requestTaskDelete,
     submitSubtask,
     submitEdit,
@@ -1318,6 +1453,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
         <button type="button" className="nav-button add-task-nav-button" onClick={() => openAddTaskDialog(pageMode === "tasks" ? (targetSectionId === null ? targetProjectId === null ? inboxPlacement : projectPlacement(targetProjectId) : sectionPlacement(targetSectionId)) : inboxPlacement)}><Plus size={17} aria-hidden="true" />Add task <kbd>Q</kbd></button>
         <button
           type="button"
+          data-mobile-drop-project="inbox"
           className={["nav-button", pageMode === "tasks" && targetProjectId === null && targetSectionId === null ? "active" : ""].filter(Boolean).join(" ")}
           onClick={() => {
             navigate("/");
@@ -1371,7 +1507,8 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
                 </button>
               </form>
             ) : (
-              <div key={project.id} data-project-id={project.id} style={{ paddingInlineStart: `${Math.min(projectDepth(activeProjects, project), 8) * 18}px` }} className={clsx("project-nav-row", draggingProjectId === project.id && "project-dragging", activeProjectDrop?.id === project.id && `project-drop-${activeProjectDrop.position}`)} draggable onDragStart={(event) => { setActiveDropZone(null); setActiveProjectDrop(null); setDraggingProjectId(project.id); event.dataTransfer.setData("application/x-project-id", project.id); event.dataTransfer.effectAllowed = "move"; }} onDragEnd={() => { setDraggingProjectId(null); setActiveProjectDrop(null); setActiveDropZone(null); }} onDragOver={markProjectDrop(project)} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setActiveProjectDrop(null); }} onDrop={dropProject(project)}>
+              <div key={project.id} data-project-id={project.id} style={{ paddingInlineStart: `${Math.min(projectDepth(activeProjects, project), 8) * 18}px` }} data-mobile-drop-project={project.id} className={clsx("project-nav-row", draggingProjectId === project.id && "project-dragging", activeProjectDrop?.id === project.id && `project-drop-${activeProjectDrop.position}`)} draggable onDragStart={(event) => { setActiveDropZone(null); setActiveProjectDrop(null); setDraggingProjectId(project.id); event.dataTransfer.setData("application/x-project-id", project.id); event.dataTransfer.effectAllowed = "move"; }} onDragEnd={() => { setDraggingProjectId(null); setActiveProjectDrop(null); setActiveDropZone(null); }} onDragOver={markProjectDrop(project)} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setActiveProjectDrop(null); }} onDrop={dropProject(project)}>
+                <button type="button" className="mobile-project-drag-handle" aria-label={`Drag project ${project.title}`} onTouchStart={startMobileProjectDrag(project)} onTouchMove={moveMobileDrag} onTouchEnd={finishMobileDrag}><GripVertical size={16} aria-hidden="true" /></button>
                 <button
                   type="button"
                   className={clsx(
@@ -1481,6 +1618,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
               return (
                 <section
                   key={section.id}
+                  data-mobile-drop-section={section.id}
                   className={clsx("drop-zone", activeDropZone === sectionPlacement(section.id) && "drop-active")}
                   onDragEnter={markDropZone(null, section.id)}
                   onDragOver={markDropZone(null, section.id)}
