@@ -9,6 +9,7 @@ const createTask = (page: Page) => async (title: string) => {
   await page.getByRole("button", { name: "Add task Q" }).click();
   await page.getByLabel("New task title").fill(title);
   await page.getByRole("button", { name: "Add task", exact: true }).click();
+  await expect(page.getByRole("button", { name: title, exact: true })).toBeVisible();
 };
 
 const createProject = (page: Page) => async (title: string) => {
@@ -192,13 +193,25 @@ test("creates projects, sections, subtasks, and exports markdown", async ({ cont
   await page.getByRole("button", { name: `${projectTitle} edited`, exact: true }).click();
   await expect(page.getByRole("heading", { name: `${projectTitle} edited` })).toBeVisible();
 
+  const projectSection = `Planning ${suffix}`;
+  await page.getByRole("button", { name: "Add section" }).click();
+  await page.getByLabel("Section title").fill(projectSection);
+  await page.getByLabel("Section title").press("Enter");
+  await expect(page.getByRole("heading", { name: projectSection, exact: true })).toBeVisible();
+
   await createTask(page)(projectTask);
   await expect(page.getByLabel(`${projectTitle} edited tasks`).getByText(projectTask)).toBeVisible();
+
+  await page.getByRole("button", { name: `Edit task ${projectTask}` }).click();
+  await expect(page.getByLabel(`Edit ${projectTask}`)).toHaveJSProperty("tagName", "TEXTAREA");
+  await page.getByLabel(`Move ${projectTask} to`).selectOption({ label: `${projectTitle} edited / ${projectSection}` });
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByLabel(`Section ${projectSection}`).getByText(projectTask)).toBeVisible();
 
   await page.getByRole("button", { name: `Add subtask to ${projectTask}` }).click();
   await page.getByLabel(`Subtask for ${projectTask}`).fill(subtask);
   await page.getByRole("button", { name: "Add subtask", exact: true }).click();
-  await expect(page.getByLabel(`${projectTitle} edited tasks`).getByText(subtask)).toBeVisible();
+  await expect(page.getByLabel(`Section ${projectSection}`).getByText(subtask)).toBeVisible();
 
   await page.getByRole("button", { name: "Preview markdown" }).click();
   await expect(page.getByRole("dialog", { name: "Markdown preview" }).getByText(projectTask)).toBeVisible();
@@ -215,6 +228,7 @@ test("creates projects, sections, subtasks, and exports markdown", async ({ cont
   await expect(page.getByRole("heading", { name: `${sectionTitle} edited` })).toBeVisible();
 
   await createTask(page)(inboxTask);
+  await expect(page.getByRole("button", { name: inboxTask, exact: true })).toBeVisible();
   await dragTaskOverProject(page)(inboxTask, `${projectTitle} edited`);
   await expect(page.getByRole("button", { name: `${projectTitle} edited`, exact: true })).toHaveClass(/drop-active/);
   await page.getByRole("button", { name: `Edit task ${inboxTask}` }).click();

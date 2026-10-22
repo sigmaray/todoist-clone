@@ -199,7 +199,8 @@ textarea {
 .task-details-modal fieldset { display: grid; gap: 8px; border: 1px solid #e3ded9; border-radius: 8px; }
 .details-subtask { border: 0; padding: 6px; background: #f8f7f5; text-align: left; cursor: pointer; }
 .details-subtask-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.details-subtask-add { display: flex; gap: 8px; }
+.details-subtask-add { display: flex; align-items: flex-start; gap: 8px; }
+.details-subtask-add .auto-grow-textarea { flex: 1 1 auto; min-width: 0; }
 .task-comments p { display: grid; margin: 0; padding: 8px; background: #f8f7f5; }
 .task-comments small { color: #706861; }
 .archived-project { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid #eee9e5; }
@@ -452,6 +453,8 @@ h1 {
   transform: translateY(1px) scale(0.992);
 }
 
+.auto-grow-textarea { display: block; min-height: 38px; overflow: hidden; resize: none; line-height: 1.45; }
+
 .task-row.drag-target {
   background: #fff8f5;
   box-shadow: 0 8px 22px rgb(34 31 31 / 0.08);
@@ -583,7 +586,9 @@ h1 {
 }
 
 .edit-panel input,
+.edit-panel textarea,
 .edit-panel select,
+.subtask-form textarea,
 .section-edit-form input {
   min-width: 0;
   border: 1px solid #d7d0ca;
@@ -955,6 +960,7 @@ body {
 .project-nav-row { display: flex; align-items: center; }
 .project-nav-row > .nav-button { flex: 1 1 auto; }
 .project-nav-row > .project-menu { flex: 0 0 34px; z-index: 1; }
+.project-nav-row.project-dragging { opacity: .48; transform: translateY(1px) scale(.992); }
 .project-menu summary { position: relative; z-index: 2; }
 
 .project-nav-row > button:not(.nav-button) {
@@ -1280,9 +1286,11 @@ body {
 }
 
 .edit-panel input,
+.edit-panel textarea,
 .edit-panel select,
 .section-edit-form input,
-.subtask-form input {
+.subtask-form input,
+.subtask-form textarea {
   border-color: #dedbd8;
   border-radius: 5px;
   font-size: 16px;
@@ -1690,5 +1698,17 @@ body {
 .inline-create-form button, .task-details-modal button:not(.task-detail-title-display):not(.task-detail-description-display):not(.task-detail-date):not(.details-subtask):not(.task-detail-label button), .add-task-dialog button { border: 0; border-radius: 6px; padding: 8px 11px; color: #514b46; background: #f2f1f0; font: inherit; font-weight: 600; cursor: pointer; }
 .inline-create-form .btn-primary, .task-details-modal .btn-primary, .add-task-dialog .btn-primary { color: white; background: #d6362b; }
 .task-details-modal button:hover, .add-task-dialog button:hover, .inline-create-form button:hover { filter: brightness(.96); }
+.shell button[type="submit"], .shell button.btn-primary { border-color: #d6362b; color: #fff; background: #d6362b; }
+.shell button[type="submit"]:hover:not(:disabled), .shell button.btn-primary:hover:not(:disabled) { border-color: #bc2d24; color: #fff; background: #bc2d24; }
+.shell .nav-button.add-task-nav-button { border: 0; border-radius: 8px; padding: 9px 12px; color: #fff; background: #d6362b; }
+.shell .nav-button.add-task-nav-button:hover { color: #fff; background: #bc2d24; }
+.shell .add-task-nav-button kbd { border-color: #ffffff70; color: #fff; background: #ffffff20; }
+.task-subtasks-card { overflow: hidden; margin: 8px 0 22px; border-color: #e5e1dd !important; border-radius: 10px; }
+.task-subtasks-card .card-header { display: flex; align-items: center; gap: 7px; padding: 10px 14px; border-bottom-color: #e5e1dd; }
+.task-subtasks-card .card-body { display: grid; gap: 8px; padding: 12px 14px; }
+.task-subtasks-card .details-subtask-row { min-height: 34px; border-bottom: 1px solid #f0eeec; }
+.task-date-quick-links { display: flex; flex-wrap: wrap; gap: 12px; }
+.task-details-modal .task-date-quick-links button { border: 0; padding: 0; color: #c83a2d; background: transparent; font-size: .92rem; font-weight: 500; text-decoration: none; }
+.task-details-modal .task-date-quick-links button:hover { color: #a62e24; text-decoration: underline; }
 .project-nav-row[draggable="true"] { cursor: grab; }
 .project-nav-row[draggable="true"]:active { cursor: grabbing; }

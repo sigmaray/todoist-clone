@@ -47,6 +47,30 @@ type MoveInput = Readonly<{
   afterId: TaskId | null;
 }>;
 
+type AutoGrowTextareaProps = Readonly<{
+  value: string;
+  onChange: (value: string) => void;
+  ariaLabel: string;
+  id?: string;
+  placeholder?: string;
+  autoFocus?: boolean;
+  required?: boolean;
+  className?: string;
+  onKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+}>;
+
+const AutoGrowTextarea = ({ value, onChange, ariaLabel, id, placeholder, autoFocus, required, className, onKeyDown }: AutoGrowTextareaProps) => {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const resize = () => {
+    const textarea = textareaRef.current;
+    if (textarea === null) return;
+    textarea.style.height = "auto";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  };
+  useEffect(resize, [value]);
+  return <textarea ref={textareaRef} id={id} aria-label={ariaLabel} autoFocus={autoFocus} required={required} className={className} placeholder={placeholder} rows={1} value={value} onChange={(event) => { onChange(event.target.value); resize(); }} onInput={resize} onKeyDown={onKeyDown} />;
+};
+
 const renderTaskNodes = (
   tasks: ReadonlyArray<TaskNode>,
   actions: Readonly<{
@@ -118,11 +142,12 @@ const renderTaskNodes = (
             >
               <label>
                 Title
-                <input
-                  aria-label={`Edit ${task.title}`}
+                <AutoGrowTextarea
+                  ariaLabel={`Edit ${task.title}`}
                   autoFocus
                   value={actions.editTitle}
-                  onChange={(event) => actions.setEditTitle(event.target.value)}
+                  onChange={actions.setEditTitle}
+                  onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); actions.submitEdit(task); } }}
                 />
               </label>
               <label>
@@ -172,12 +197,14 @@ const renderTaskNodes = (
             }}
           >
             <label htmlFor={`subtask-${task.id}`}>Subtask for {task.title}</label>
-            <input
+            <AutoGrowTextarea
               id={`subtask-${task.id}`}
+              ariaLabel={`Subtask for ${task.title}`}
               autoFocus
               value={actions.subtaskTitle}
-              onChange={(event) => actions.setSubtaskTitle(event.target.value)}
+              onChange={actions.setSubtaskTitle}
               placeholder="Add a subtask"
+              onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); actions.submitSubtask(task); } }}
             />
             <button type="submit">Add subtask</button>
             <button type="button" onClick={actions.cancelSubtask}>
@@ -198,13 +225,14 @@ const sectionPlacement = (id: SectionId) => `section:${id}`;
 const taskPlacement = (task: TaskNode) =>
   task.sectionId !== null ? sectionPlacement(task.sectionId) : task.projectId !== null ? projectPlacement(task.projectId) : inboxPlacement;
 
-const parsePlacement = (placement: string): Readonly<{ projectId: ProjectId | null; sectionId: SectionId | null }> => {
+const parsePlacement = (placement: string, sections: ReadonlyArray<Section>): Readonly<{ projectId: ProjectId | null; sectionId: SectionId | null }> => {
   if (placement.startsWith("project:")) {
     return Object.freeze({ projectId: placement.slice("project:".length), sectionId: null });
   }
 
   if (placement.startsWith("section:")) {
-    return Object.freeze({ projectId: null, sectionId: placement.slice("section:".length) });
+    const sectionId = placement.slice("section:".length);
+    return Object.freeze({ projectId: sections.find((section) => section.id === sectionId)?.projectId ?? null, sectionId });
   }
 
   return Object.freeze({ projectId: null, sectionId: null });
@@ -216,10 +244,11 @@ const createPlacementOptions = (
 ): ReadonlyArray<Readonly<{ value: string; label: string }>> =>
   Object.freeze([
     Object.freeze({ value: inboxPlacement, label: "Inbox" }),
-    ...sections
-      .filter((section) => section.projectId === null)
-      .map((section) => Object.freeze({ value: sectionPlacement(section.id), label: `Inbox / ${section.title}` })),
-    ...projects.map((project) => Object.freeze({ value: projectPlacement(project.id), label: `My Projects / ${project.title}` }))
+    ...sections.map((section) => {
+      const projectTitle = section.projectId === null ? "Inbox" : projects.find((project) => project.id === section.projectId)?.title ?? "Project";
+      return Object.freeze({ value: sectionPlacement(section.id), label: `${projectTitle} / ${section.title}` });
+    }),
+    ...projects.map((project) => Object.freeze({ value: projectPlacement(project.id), label: project.title }))
   ]);
 
 const appendById = <TItem extends Readonly<{ id: string }>>(
@@ -253,6 +282,17 @@ const filterTaskTree = (tasks: ReadonlyArray<TaskNode>, predicate: (task: TaskNo
 
 const flattenTaskNodes = (tasks: ReadonlyArray<TaskNode>): ReadonlyArray<Task> =>
   Object.freeze(tasks.flatMap((task) => [task, ...flattenTaskNodes(task.children)]));
+
+const toLocalIsoDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
+const getDateShortcut = (shortcut: "Today" | "Tomorrow" | "This weekend" | "Next week") => {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  if (shortcut === "Tomorrow") date.setDate(date.getDate() + 1);
+  if (shortcut === "This weekend") date.setDate(date.getDate() + ((6 - date.getDay() + 7) % 7));
+  if (shortcut === "Next week") date.setDate(date.getDate() + ((8 - date.getDay()) % 7 || 7));
+  return toLocalIsoDate(date);
+};
 
 const SearchPalette = ({ tasks, projects = Object.freeze([]), sections = Object.freeze([]), onTaskSelect }: Readonly<{ tasks: ReadonlyArray<Task>; projects?: ReadonlyArray<Project>; sections?: ReadonlyArray<Section>; onTaskSelect: (task: Task) => void }>) => {
   const [open, setOpen] = useState(false);
@@ -338,20 +378,23 @@ const slug = (value: string) =>
 const currentMarkdown = (
   title: string,
   inboxRootTasks: ReadonlyArray<TaskNode>,
-  inboxSections: ReadonlyArray<Section>,
+  sections: ReadonlyArray<Section>,
   allTasks: ReadonlyArray<TaskNode>,
   targetProjectId: ProjectId | null
 ) => {
   if (targetProjectId !== null) {
-    return renderTaskMarkdownDocument(
-      title,
-      allTasks.filter((task) => task.projectId === targetProjectId && task.sectionId === null)
-    );
+    return [
+      renderTaskMarkdownDocument(title, allTasks.filter((task) => task.projectId === targetProjectId && task.sectionId === null)),
+      ...sections.filter((section) => section.projectId === targetProjectId).map((section) => renderTaskMarkdownDocument(
+        `${title} / ${section.title}`,
+        allTasks.filter((task) => task.projectId === targetProjectId && task.sectionId === section.id)
+      ))
+    ].join("\n");
   }
 
   return [
     renderTaskMarkdownDocument("Inbox", inboxRootTasks),
-    ...inboxSections.map((section) =>
+    ...sections.filter((section) => section.projectId === null).map((section) =>
       renderTaskMarkdownDocument(
         `Inbox / ${section.title}`,
         allTasks.filter((task) => task.projectId === null && task.sectionId === section.id)
@@ -455,6 +498,8 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
   const [activeDragTarget, setActiveDragTarget] = useState<ActiveDragTarget | null>(null);
   const [activeDropZone, setActiveDropZone] = useState<DropZoneId | null>(null);
+  const [activeProjectDropId, setActiveProjectDropId] = useState<ProjectId | null>(null);
+  const [draggingProjectId, setDraggingProjectId] = useState<ProjectId | null>(null);
   const [targetProjectId, setTargetProjectId] = useState<ProjectId | null>(() => new URLSearchParams(window.location.search).get("project"));
   const [targetSectionId, setTargetSectionId] = useState<SectionId | null>(null);
   const [editTaskId, setEditTaskId] = useState<string | null>(null);
@@ -603,7 +648,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   };
 
   const createSectionMutation = useMutation({
-    mutationFn: (nextTitle: string) => api.createSection(nextTitle, null),
+    mutationFn: (input: Readonly<{ title: string; projectId: ProjectId | null }>) => api.createSection(input.title, input.projectId),
     onSuccess: (section) => {
       setSectionTitle("");
       setAddingSection(false);
@@ -665,7 +710,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
 
   const editMutation = useMutation({
     mutationFn: async (task: TaskNode) => {
-      const placement = parsePlacement(editPlacement);
+      const placement = parsePlacement(editPlacement, allSections);
       const titleTask = await api.updateTask(task.id, Object.freeze({ title: editTitle.trim() }));
 
       return taskPlacement(task) === editPlacement
@@ -756,7 +801,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     const trimmed = sectionTitle.trim();
 
     if (trimmed.length > 0) {
-      createSectionMutation.mutate(trimmed);
+      createSectionMutation.mutate({ title: trimmed, projectId: targetProjectId });
     }
   };
 
@@ -945,6 +990,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     }
   };
   const inboxSections = allSections.filter((section) => section.projectId === null);
+  const projectSections = allSections.filter((section) => section.projectId === targetProjectId && targetProjectId !== null);
   const inboxRootTasks = allTasks.filter((task) => task.projectId === null && task.sectionId === null);
 
   const taskActions = Object.freeze({
@@ -988,7 +1034,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
 
   const taskTargetLabel =
     targetSectionId !== null
-      ? inboxSections.find((section) => section.id === targetSectionId)?.title ?? "selected section"
+      ? allSections.find((section) => section.id === targetSectionId)?.title ?? "selected section"
       : targetProjectId !== null
         ? allProjects.find((project) => project.id === targetProjectId)?.title ?? "selected project"
         : "Inbox";
@@ -998,7 +1044,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     ? filterTaskTree(allTasks, (task) => Boolean(task.dueDate))
     : filterTaskTree(allTasks, (task) => task.labels.length > 0 && (!selectedLabel || task.labels.includes(selectedLabel)));
   const viewTitle = pageMode === "dates" ? "Dates" : pageMode === "labels" ? (selectedLabel ? `Label: ${selectedLabel}` : "Labels") : targetProjectId === null ? "Inbox" : taskTargetLabel;
-  const markdown = currentMarkdown(taskTargetLabel, inboxRootTasks, inboxSections, allTasks, targetProjectId);
+  const markdown = currentMarkdown(taskTargetLabel, inboxRootTasks, allSections, allTasks, targetProjectId);
 
   const copyMarkdown = async () => {
     await copyText(markdown);
@@ -1086,13 +1132,14 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
                 </button>
               </form>
             ) : (
-              <div key={project.id} className="project-nav-row" draggable onDragStart={(event) => { event.dataTransfer.setData("application/x-project-id", project.id); event.dataTransfer.effectAllowed = "move"; }} onDragOver={(event) => { if (event.dataTransfer.types.includes("application/x-project-id")) event.preventDefault(); }} onDrop={(event) => { const draggedId = event.dataTransfer.getData("application/x-project-id"); if (!draggedId || draggedId === project.id) return; event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); const placeBefore = event.clientY < rect.top + rect.height / 2; const index = activeProjects.findIndex((item) => item.id === project.id); const beforeId = placeBefore ? project.id : activeProjects[index + 1]?.id ?? null; const afterId = placeBefore ? activeProjects[index - 1]?.id ?? null : project.id; reorderProjectMutation.mutate({ id: draggedId, beforeId, afterId }); }}>
+              <div key={project.id} className={clsx("project-nav-row", draggingProjectId === project.id && "project-dragging")} draggable onDragStart={(event) => { setDraggingProjectId(project.id); event.dataTransfer.setData("application/x-project-id", project.id); event.dataTransfer.effectAllowed = "move"; }} onDragEnd={() => { setDraggingProjectId(null); setActiveProjectDropId(null); }} onDragOver={(event) => { if (event.dataTransfer.types.includes("application/x-project-id")) { event.preventDefault(); setActiveProjectDropId(project.id); } }} onDragLeave={() => setActiveProjectDropId(null)} onDrop={(event) => { const draggedId = event.dataTransfer.getData("application/x-project-id"); setActiveProjectDropId(null); if (!draggedId || draggedId === project.id) return; event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); const placeBefore = event.clientY < rect.top + rect.height / 2; const index = activeProjects.findIndex((item) => item.id === project.id); const beforeId = placeBefore ? project.id : activeProjects[index + 1]?.id ?? null; const afterId = placeBefore ? activeProjects[index - 1]?.id ?? null : project.id; reorderProjectMutation.mutate({ id: draggedId, beforeId, afterId }); }}>
                 <button
                   type="button"
                   className={clsx(
                     "nav-button",
                     targetProjectId === project.id && "active",
-                    activeDropZone === projectPlacement(project.id) && "drop-active"
+                    activeDropZone === projectPlacement(project.id) && "drop-active",
+                    activeProjectDropId === project.id && "drop-active"
                   )}
                   onClick={() => {
                     window.history.pushState({}, "", `/?project=${encodeURIComponent(project.id)}`); setCurrentPath("/");
@@ -1254,23 +1301,41 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
             })}
           </div>
         ) : (
-          <section
-            className={clsx("drop-zone", activeDropZone === projectPlacement(targetProjectId) && "drop-active")}
-            onDragEnter={markDropZone(targetProjectId, null)}
-            onDragOver={markDropZone(targetProjectId, null)}
-            onDragLeave={() => setActiveDropZone(null)}
-            onDrop={moveDroppedTask(targetProjectId, null)}
-            aria-label={`${taskTargetLabel} tasks`}
-          >
-            {allTasks.filter((task) => task.projectId === targetProjectId && task.sectionId === null).length > 0 ? (
-              renderTaskNodes(
-                allTasks.filter((task) => task.projectId === targetProjectId && task.sectionId === null),
-                taskActions
-              )
-            ) : (
-              <p className="empty">No project tasks yet.</p>
-            )}
-          </section>
+          <div className="board">
+            <section
+              className={clsx("drop-zone", activeDropZone === projectPlacement(targetProjectId) && "drop-active")}
+              onDragEnter={markDropZone(targetProjectId, null)}
+              onDragOver={markDropZone(targetProjectId, null)}
+              onDragLeave={() => setActiveDropZone(null)}
+              onDrop={moveDroppedTask(targetProjectId, null)}
+              aria-label={`${taskTargetLabel} tasks`}
+            >
+              {allTasks.filter((task) => task.projectId === targetProjectId && task.sectionId === null).length > 0
+                ? renderTaskNodes(allTasks.filter((task) => task.projectId === targetProjectId && task.sectionId === null), taskActions)
+                : <p className="empty">No project tasks yet.</p>}
+            </section>
+            <div className="section-create-block">
+              {addingSection ? <form className="inline-create-form" onSubmit={submitSection} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); cancelSectionCreate(); } }}>
+                <label htmlFor="section-title">Title</label><input ref={sectionCreateInputRef} id="section-title" aria-label="Section title" value={sectionTitle} onChange={(event) => setSectionTitle(event.target.value)} />
+                <div><button type="submit" className="btn-primary">Save</button><button type="button" onClick={cancelSectionCreate}>Cancel</button></div>
+              </form> : <button type="button" className="add-section-trigger" onClick={() => { setSectionTitle(""); setAddingSection(true); }}><Plus size={16} aria-hidden="true" />Add section</button>}
+            </div>
+            {projectSections.map((section) => {
+              const sectionTasks = allTasks.filter((task) => task.projectId === targetProjectId && task.sectionId === section.id);
+              return <section key={section.id} className={clsx("drop-zone", activeDropZone === sectionPlacement(section.id) && "drop-active")} onDragEnter={markDropZone(targetProjectId, section.id)} onDragOver={markDropZone(targetProjectId, section.id)} onDragLeave={() => setActiveDropZone(null)} onDrop={moveDroppedTask(targetProjectId, section.id)} aria-label={`Section ${section.title}`}>
+                <div className="section-header">
+                  {editSectionId === section.id ? <form className="section-edit-form" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setEditSectionId(null); setEditSectionTitle(""); } }} onSubmit={submitSectionEdit(section)}>
+                    <label htmlFor={`section-edit-${section.id}`}>Section title</label><input id={`section-edit-${section.id}`} autoFocus value={editSectionTitle} onChange={(event) => setEditSectionTitle(event.target.value)} />
+                    <button type="submit">Save section</button><button type="button" onClick={() => { setEditSectionId(null); setEditSectionTitle(""); }}>Cancel</button>
+                  </form> : <><h2>{section.title}</h2><div className="section-actions">
+                    <button type="button" aria-label={`Edit section ${section.title}`} onClick={() => startSectionEdit(section)}><Edit3 size={14} aria-hidden="true" />Edit</button>
+                    <button type="button" className="danger" aria-label={`Delete section ${section.title}`} onClick={() => requestSectionDelete(section)}><Trash2 size={14} aria-hidden="true" />Delete</button>
+                  </div></>}
+                </div>
+                {sectionTasks.length > 0 ? renderTaskNodes(sectionTasks, taskActions) : <p className="empty">Drop project tasks here.</p>}
+              </section>;
+            })}
+          </div>
         )}
       </section>
       {markdownModal !== null ? (
@@ -1300,7 +1365,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
           </FloatingFocusManager>
         </FloatingOverlay>
       ) : null}
-      {addTaskOpen ? <div className="task-details-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setAddTaskOpen(false); }}><section className="add-task-dialog" role="dialog" aria-modal="true" aria-label="Add task" onKeyDown={(event) => { if (event.key === "Escape") setAddTaskOpen(false); }}><header><h2>Add task</h2><button type="button" aria-label="Close add task" onClick={() => setAddTaskOpen(false)}><X size={18} /></button></header><form onSubmit={async (event) => { event.preventDefault(); const taskTitle = addTaskTitle.trim(); if (!taskTitle) return; const created = await api.createTask(taskTitle, addTaskProjectId, null, null); const patch: Parameters<ApplicationApi["updateTask"]>[1] = { description: addTaskDescription, dueDate: addTaskDate || null, labels: addTaskLabels.split(",").map((label) => label.trim()).filter(Boolean) }; if (patch.description || patch.dueDate || patch.labels?.length) await api.updateTask(created.id, patch); await queryClient.invalidateQueries({ queryKey: taskQueryKey }); setAddTaskOpen(false); }}><label>Task name<input autoFocus aria-label="New task title" value={addTaskTitle} onChange={(event) => setAddTaskTitle(event.target.value)} required /></label><label>Description<textarea aria-label="New task description" value={addTaskDescription} onChange={(event) => setAddTaskDescription(event.target.value)} rows={3} /></label><label>Project<select aria-label="Add task project" value={addTaskProjectId ?? "inbox"} onChange={(event) => setAddTaskProjectId(event.target.value === "inbox" ? null : event.target.value)}><option value="inbox">Inbox</option>{activeProjects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}</select></label><label>Date<input aria-label="New task date" type="date" value={addTaskDate} onChange={(event) => setAddTaskDate(event.target.value)} /></label><label>Labels<input aria-label="New task labels" value={addTaskLabels} onChange={(event) => setAddTaskLabels(event.target.value)} placeholder="Separate labels with commas" /></label><div><button type="button" onClick={() => setAddTaskOpen(false)}>Cancel</button><button type="submit" className="btn-primary">Add task</button></div></form></section></div> : null}
+      {addTaskOpen ? <div className="task-details-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setAddTaskOpen(false); }}><section className="add-task-dialog" role="dialog" aria-modal="true" aria-label="Add task" onKeyDown={(event) => { if (event.key === "Escape") setAddTaskOpen(false); }}><header><h2>Add task</h2><button type="button" aria-label="Close add task" onClick={() => setAddTaskOpen(false)}><X size={18} /></button></header><form onSubmit={async (event) => { event.preventDefault(); const taskTitle = addTaskTitle.trim(); if (!taskTitle) return; const created = await api.createTask(taskTitle, addTaskProjectId, null, null); const patch: Parameters<ApplicationApi["updateTask"]>[1] = { description: addTaskDescription, dueDate: addTaskDate || null, labels: addTaskLabels.split(",").map((label) => label.trim()).filter(Boolean) }; if (patch.description || patch.dueDate || patch.labels?.length) await api.updateTask(created.id, patch); await queryClient.invalidateQueries({ queryKey: taskQueryKey }); setAddTaskOpen(false); }}><label>Task name<AutoGrowTextarea autoFocus ariaLabel="New task title" value={addTaskTitle} onChange={setAddTaskTitle} required onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} /></label><label>Description<AutoGrowTextarea ariaLabel="New task description" value={addTaskDescription} onChange={setAddTaskDescription} /></label><label>Project<select aria-label="Add task project" value={addTaskProjectId ?? "inbox"} onChange={(event) => setAddTaskProjectId(event.target.value === "inbox" ? null : event.target.value)}><option value="inbox">Inbox</option>{activeProjects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}</select></label><label>Date<input aria-label="New task date" type="date" value={addTaskDate} onChange={(event) => setAddTaskDate(event.target.value)} /></label><label>Labels<input aria-label="New task labels" value={addTaskLabels} onChange={(event) => setAddTaskLabels(event.target.value)} placeholder="Separate labels with commas" /></label><div><button type="button" onClick={() => setAddTaskOpen(false)}>Cancel</button><button type="submit" className="btn-primary">Add task</button></div></form></section></div> : null}
       {selectedDetailsTask !== null ? (
         <div className="task-details-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDetailsTaskId(null); }}>
           <section className="task-details-modal" role="dialog" aria-modal="true" aria-label={`Task details: ${selectedDetailsTask.title}`} onKeyDown={(event) => { if (event.key === "Escape" && editingDetailField === null && !datePickerOpen) setDetailsTaskId(null); }}>
@@ -1308,30 +1373,32 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
             <div className="task-details-layout">
               <div className="task-details-main">
                 <div className="task-detail-editable">
-                  {editingDetailField === "title" ? <div className="task-detail-editor"><input autoFocus aria-label="Edit task title" value={detailTitle} onChange={(event) => setDetailTitle(event.target.value)} onKeyDown={async (event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setDetailTitle(selectedDetailsTask.title); setEditingDetailField(null); } if (event.key === "Enter") { event.preventDefault(); const value = detailTitle.trim(); if (value && await saveTaskDetails({ title: value })) setEditingDetailField(null); } }} /><div><button type="button" onClick={() => { setDetailTitle(selectedDetailsTask.title); setEditingDetailField(null); }}>Cancel</button><button type="button" className="btn-primary" onClick={async () => { const value = detailTitle.trim(); if (value && await saveTaskDetails({ title: value })) setEditingDetailField(null); }}>Save</button></div></div> : <button type="button" className="task-detail-title-display" aria-label="Edit task title" onClick={() => { setDetailTitle(selectedDetailsTask.title); setEditingDetailField("title"); }}>{selectedDetailsTask.title}</button>}
-                  {editingDetailField === "description" ? <div className="task-detail-editor"><textarea autoFocus aria-label="Edit task description" value={detailDescription} onChange={(event) => setDetailDescription(event.target.value)} rows={4} onKeyDown={async (event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setDetailDescription(selectedDetailsTask.description); setEditingDetailField(null); } if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); if (await saveTaskDetails({ description: detailDescription })) setEditingDetailField(null); } }} /><div><button type="button" onClick={() => { setDetailDescription(selectedDetailsTask.description); setEditingDetailField(null); }}>Cancel</button><button type="button" className="btn-primary" onClick={async () => { if (await saveTaskDetails({ description: detailDescription })) setEditingDetailField(null); }}>Save</button></div></div> : <button type="button" className="task-detail-description-display" aria-label="Edit task description" onClick={() => { setDetailDescription(selectedDetailsTask.description); setEditingDetailField("description"); }}>{selectedDetailsTask.description || "Add description"}</button>}
+                  {editingDetailField === "title" ? <div className="task-detail-editor"><AutoGrowTextarea autoFocus ariaLabel="Edit task title" value={detailTitle} onChange={setDetailTitle} onKeyDown={async (event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setDetailTitle(selectedDetailsTask.title); setEditingDetailField(null); } if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); const value = detailTitle.trim(); if (value && await saveTaskDetails({ title: value })) setEditingDetailField(null); } }} /><div><button type="button" onClick={() => { setDetailTitle(selectedDetailsTask.title); setEditingDetailField(null); }}>Cancel</button><button type="button" className="btn-primary" onClick={async () => { const value = detailTitle.trim(); if (value && await saveTaskDetails({ title: value })) setEditingDetailField(null); }}>Save</button></div></div> : <button type="button" className="task-detail-title-display" aria-label="Edit task title" onClick={() => { setDetailTitle(selectedDetailsTask.title); setEditingDetailField("title"); }}>{selectedDetailsTask.title}</button>}
+                  {editingDetailField === "description" ? <div className="task-detail-editor"><AutoGrowTextarea autoFocus ariaLabel="Edit task description" value={detailDescription} onChange={setDetailDescription} onKeyDown={async (event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setDetailDescription(selectedDetailsTask.description); setEditingDetailField(null); } if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); if (await saveTaskDetails({ description: detailDescription })) setEditingDetailField(null); } }} /><div><button type="button" onClick={() => { setDetailDescription(selectedDetailsTask.description); setEditingDetailField(null); }}>Cancel</button><button type="button" className="btn-primary" onClick={async () => { if (await saveTaskDetails({ description: detailDescription })) setEditingDetailField(null); }}>Save</button></div></div> : <button type="button" className="task-detail-description-display" aria-label="Edit task description" onClick={() => { setDetailDescription(selectedDetailsTask.description); setEditingDetailField("description"); }}>{selectedDetailsTask.description || "Add description"}</button>}
                 </div>
-                <fieldset><legend>Subtasks</legend>
-
-                {selectedDetailsTask.children.map((child) => <div className="details-subtask-row" key={child.id}><button type="button" className="details-subtask" onClick={() => openDetails(child)}>{child.title}</button><button type="button" aria-label={`Delete subtask ${child.title}`} onClick={async () => { if (!confirmDeletion(`Delete subtask “${child.title}” and its descendants?`)) return; await api.deleteTask(child.id); await queryClient.invalidateQueries({ queryKey: taskQueryKey }); }}>Delete</button></div>)}
-                <div className="details-subtask-add"><input aria-label="New subtask title" value={detailSubtask} onChange={(event) => setDetailSubtask(event.target.value)} onKeyDown={async (event) => { if (event.key === "Enter") { event.preventDefault(); const title = detailSubtask.trim(); if (!title) return; await api.createTask(title, selectedDetailsTask.projectId, selectedDetailsTask.sectionId, selectedDetailsTask.id); setDetailSubtask(""); await queryClient.invalidateQueries({ queryKey: taskQueryKey }); } }} placeholder="Add subtask" /><button type="button" onClick={async () => { const title = detailSubtask.trim(); if (!title) return; await api.createTask(title, selectedDetailsTask.projectId, selectedDetailsTask.sectionId, selectedDetailsTask.id); setDetailSubtask(""); await queryClient.invalidateQueries({ queryKey: taskQueryKey }); }}>Add</button></div>
-              </fieldset>
+                <section className="card border task-subtasks-card" aria-labelledby="task-subtasks-title">
+                  <div className="card-header bg-light"><strong id="task-subtasks-title">Subtasks</strong><span className="text-muted">{selectedDetailsTask.children.filter((child) => child.completed).length}/{selectedDetailsTask.children.length}</span></div>
+                  <div className="card-body task-subtasks-body">
+                    {selectedDetailsTask.children.map((child) => <div className="details-subtask-row" key={child.id}><button type="button" className="details-subtask" onClick={() => openDetails(child)}>{child.title}</button><button type="button" aria-label={`Delete subtask ${child.title}`} onClick={async () => { if (!confirmDeletion(`Delete subtask “${child.title}” and its descendants?`)) return; await api.deleteTask(child.id); await queryClient.invalidateQueries({ queryKey: taskQueryKey }); }}>Delete</button></div>)}
+                    <div className="details-subtask-add"><AutoGrowTextarea ariaLabel="New subtask title" value={detailSubtask} onChange={setDetailSubtask} onKeyDown={async (event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); const title = detailSubtask.trim(); if (!title) return; await api.createTask(title, selectedDetailsTask.projectId, selectedDetailsTask.sectionId, selectedDetailsTask.id); setDetailSubtask(""); await queryClient.invalidateQueries({ queryKey: taskQueryKey }); } }} placeholder="Add subtask" /><button type="button" className="btn-primary" onClick={async () => { const title = detailSubtask.trim(); if (!title) return; await api.createTask(title, selectedDetailsTask.projectId, selectedDetailsTask.sectionId, selectedDetailsTask.id); setDetailSubtask(""); await queryClient.invalidateQueries({ queryKey: taskQueryKey }); }}>Add</button></div>
+                  </div>
+                </section>
               <section className="task-comments"><h3>Comments</h3>
                 {selectedDetailsTask.comments.map((comment) => <article className="task-comment" key={comment.id}>
-                  {editingCommentId === comment.id ? <><textarea aria-label={`Edit comment ${comment.id}`} value={editingCommentBody} onChange={(event) => setEditingCommentBody(event.target.value)} rows={2} /><div><button type="button" onClick={async () => { const comments = selectedDetailsTask.comments.map((item) => item.id === comment.id ? Object.freeze({ ...item, body: editingCommentBody.trim() }) : item); await api.updateTask(selectedDetailsTask.id, { comments }); setEditingCommentId(null); await queryClient.invalidateQueries({ queryKey: taskQueryKey }); }}>Save comment</button><button type="button" onClick={() => setEditingCommentId(null)}>Cancel</button></div></> : <><p>{comment.body}</p><small>{new Date(comment.createdAt).toLocaleString()}</small><div><button type="button" onClick={() => { setEditingCommentId(comment.id); setEditingCommentBody(comment.body); }}>Edit</button><button type="button" className="danger" onClick={async () => { if (!confirmDeletion("Delete this comment?")) return; await api.updateTask(selectedDetailsTask.id, { comments: selectedDetailsTask.comments.filter((item) => item.id !== comment.id) }); await queryClient.invalidateQueries({ queryKey: taskQueryKey }); }}>Delete</button></div></>}
+                  {editingCommentId === comment.id ? <><AutoGrowTextarea ariaLabel={`Edit comment ${comment.id}`} value={editingCommentBody} onChange={setEditingCommentBody} /><div><button type="button" className="btn-primary" onClick={async () => { const comments = selectedDetailsTask.comments.map((item) => item.id === comment.id ? Object.freeze({ ...item, body: editingCommentBody.trim() }) : item); await api.updateTask(selectedDetailsTask.id, { comments }); setEditingCommentId(null); await queryClient.invalidateQueries({ queryKey: taskQueryKey }); }}>Save comment</button><button type="button" onClick={() => setEditingCommentId(null)}>Cancel</button></div></> : <><p>{comment.body}</p><small>{new Date(comment.createdAt).toLocaleString()}</small><div><button type="button" onClick={() => { setEditingCommentId(comment.id); setEditingCommentBody(comment.body); }}>Edit</button><button type="button" className="danger" onClick={async () => { if (!confirmDeletion("Delete this comment?")) return; await api.updateTask(selectedDetailsTask.id, { comments: selectedDetailsTask.comments.filter((item) => item.id !== comment.id) }); await queryClient.invalidateQueries({ queryKey: taskQueryKey }); }}>Delete</button></div></>}
                 </article>)}
-                <label>Add comment<textarea value={detailComment} onChange={(event) => setDetailComment(event.target.value)} rows={2} /></label>
-                <button type="button" disabled={!detailComment.trim()} onClick={async () => { const comments = [...selectedDetailsTask.comments, { id: crypto.randomUUID(), body: detailComment.trim(), createdAt: new Date().toISOString() }]; await api.updateTask(selectedDetailsTask.id, { comments }); setDetailComment(""); await queryClient.invalidateQueries({ queryKey: taskQueryKey }); }}>Add comment</button>
+                <label>Add comment<AutoGrowTextarea ariaLabel="Add comment" value={detailComment} onChange={setDetailComment} /></label>
+                <button type="button" className="btn-primary" disabled={!detailComment.trim()} onClick={async () => { const comments = [...selectedDetailsTask.comments, { id: crypto.randomUUID(), body: detailComment.trim(), createdAt: new Date().toISOString() }]; await api.updateTask(selectedDetailsTask.id, { comments }); setDetailComment(""); await queryClient.invalidateQueries({ queryKey: taskQueryKey }); }}>Add comment</button>
               </section>
               </div>
               <aside className="task-details-sidebar">
                 <section><h3>Project</h3><select className="form-select" aria-label="Project or Inbox" value={detailProjectId === null ? "inbox" : `project:${detailProjectId}`} onChange={async (event) => { const projectId = event.target.value === "inbox" ? null : event.target.value.slice("project:".length); setDetailProjectId(projectId); setDetailSaveStatus("Saving…"); try { await api.moveTask(selectedDetailsTask.id, projectId, null, null, null, null); await queryClient.invalidateQueries({ queryKey: taskQueryKey }); setDetailSaveStatus("Saved"); } catch { setDetailProjectId(selectedDetailsTask.projectId); setDetailSaveStatus("Could not save changes"); } }}><option value="inbox">Inbox</option>{activeProjects.map((project) => <option key={project.id} value={`project:${project.id}`}>{project.title}</option>)}</select></section>
-                <section><h3>Date</h3>{detailDueDate ? <div className="task-detail-meta-value"><button type="button" className="task-detail-date" onClick={() => setDatePickerOpen(true)} title={detailDueDate}>{new Date(`${detailDueDate}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</button><button type="button" aria-label="Remove date" onClick={async () => { setDetailDueDate(""); await saveTaskDetails({ dueDate: null }); }}>×</button></div> : <button type="button" onClick={() => setDatePickerOpen(true)}>＋ Add date</button>}</section>
+                <section><h3>Date</h3>{detailDueDate ? <div className="task-detail-meta-value"><button type="button" className="task-detail-date" onClick={() => setDatePickerOpen(true)} title={detailDueDate}>{new Date(`${detailDueDate}T00:00:00`).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}</button><button type="button" aria-label="Remove date" onClick={async () => { setDetailDueDate(""); await saveTaskDetails({ dueDate: null }); }}>×</button></div> : <button type="button" className="btn-primary" onClick={() => setDatePickerOpen(true)}>＋ Add date</button>}</section>
                 <section><div className="task-detail-label-heading"><h3>Labels</h3><button type="button" aria-label="Add label" onClick={() => setDetailLabelInput(" ")}>＋</button></div><div className="detail-label-chips">{selectedDetailsTask.labels.map((label) => <span className="task-detail-label" key={label}>{label}<button type="button" aria-label={`Remove label ${label}`} onClick={() => { const labels = selectedDetailsTask.labels.filter((item) => item !== label); setDetailLabels(labels.join(", ")); void saveTaskDetails({ labels }); }}>×</button></span>)}</div>{detailLabelInput !== "" ? <><input autoFocus aria-label="Labels" list="task-label-options" value={detailLabelInput.trimStart()} placeholder="Add a label" onChange={(event) => setDetailLabelInput(event.target.value)} onKeyDown={async (event) => { if (event.key === "Escape") setDetailLabelInput(""); if (event.key === "Enter") { event.preventDefault(); const label = detailLabelInput.trim(); if (!label) return; const labels = Array.from(new Set([...selectedDetailsTask.labels, label])); if (await saveTaskDetails({ labels })) setDetailLabelInput(""); } }} /><datalist id="task-label-options">{Array.from(new Set(flatTasks.flatMap((task) => task.labels))).map((label) => <option key={label} value={label} />)}</datalist></> : null}</section>
                 <p className="task-autosave-status" aria-live="polite">{detailSaveStatus}</p>
               </aside>
             </div>
-            {datePickerOpen ? <div className="task-date-picker-backdrop"><section className="task-date-picker" role="dialog" aria-modal="true" aria-label="Change date" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setDetailDueDate(selectedDetailsTask.dueDate ?? ""); setDatePickerOpen(false); } if (event.key === "Enter") { event.preventDefault(); void saveTaskDetails({ dueDate: detailDueDate || null }).then((saved) => { if (saved) setDatePickerOpen(false); }); } }}><h3>{selectedDetailsTask.dueDate ? "Change date" : "Add date"}</h3><input ref={detailDateInputRef} autoFocus type="date" aria-label="New date" value={detailDueDate} onChange={(event) => setDetailDueDate(event.target.value)} /><div><button type="button" onClick={() => { setDetailDueDate(selectedDetailsTask.dueDate ?? ""); setDatePickerOpen(false); }}>Cancel</button><button type="button" className="btn-primary" onClick={async () => { if (await saveTaskDetails({ dueDate: detailDueDate || null })) setDatePickerOpen(false); }}>Save date</button></div></section></div> : null}
+            {datePickerOpen ? <div className="task-date-picker-backdrop"><section className="task-date-picker" role="dialog" aria-modal="true" aria-label="Change date" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setDetailDueDate(selectedDetailsTask.dueDate ?? ""); setDatePickerOpen(false); } if (event.key === "Enter") { event.preventDefault(); void saveTaskDetails({ dueDate: detailDueDate || null }).then((saved) => { if (saved) setDatePickerOpen(false); }); } }}><h3>{selectedDetailsTask.dueDate ? "Change date" : "Add date"}</h3><nav className="task-date-quick-links" aria-label="Quick dates">{(["Today", "Tomorrow", "This weekend", "Next week"] as const).map((shortcut) => <button type="button" key={shortcut} onClick={async () => { const date = getDateShortcut(shortcut); setDetailDueDate(date); if (await saveTaskDetails({ dueDate: date })) setDatePickerOpen(false); }}>{shortcut}</button>)}</nav><input ref={detailDateInputRef} autoFocus type="date" aria-label="New date" value={detailDueDate} onChange={(event) => setDetailDueDate(event.target.value)} /><div><button type="button" onClick={() => { setDetailDueDate(selectedDetailsTask.dueDate ?? ""); setDatePickerOpen(false); }}>Cancel</button><button type="button" className="btn-primary" onClick={async () => { if (await saveTaskDetails({ dueDate: detailDueDate || null })) setDatePickerOpen(false); }}>Save date</button></div></section></div> : null}
           </section>
         </div>
       ) : null}
