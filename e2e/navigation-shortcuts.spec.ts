@@ -30,6 +30,7 @@ test("task dialog, inline keyboard editing, navigation, search, and calendar wor
 
   await page.getByRole("button", { name: `Edit task ${taskName}` }).click();
   const taskEditor = page.getByLabel(`Edit ${taskName}`);
+  await expect(taskEditor).toBeFocused();
   await taskEditor.fill("cancelled title");
   await taskEditor.press("Escape");
   await expect(page.getByRole("button", { name: taskName, exact: true })).toBeVisible();
@@ -42,6 +43,7 @@ test("task dialog, inline keyboard editing, navigation, search, and calendar wor
   await page.locator(`summary[aria-label="Project menu ${project}"]`).click();
   await page.getByRole("button", { name: "Edit", exact: true }).click();
   const projectEditor = page.locator('input[id^="project-edit-"]');
+  await expect(projectEditor).toBeFocused();
   await projectEditor.fill("cancel project");
   await projectEditor.press("Escape");
   await expect(page.getByRole("button", { name: project, exact: true })).toBeVisible();
@@ -57,6 +59,7 @@ test("task dialog, inline keyboard editing, navigation, search, and calendar wor
   await page.getByLabel("Section title").fill(sectionName);
   await page.getByRole("button", { name: "Add section" }).click();
   await page.getByRole("button", { name: `Edit section ${sectionName}` }).click();
+  await expect(page.locator('input[id^="section-edit-"]')).toBeFocused();
   await page.locator('input[id^="section-edit-"]').fill("discard section");
   await page.locator('input[id^="section-edit-"]').press("Escape");
   await expect(page.getByRole("heading", { name: sectionName, exact: true })).toBeVisible();
@@ -76,15 +79,19 @@ test("task dialog, inline keyboard editing, navigation, search, and calendar wor
   await page.keyboard.press("Escape");
 
   await page.goto("/dates");
+  await expect(page.getByRole("button", { name: "Inbox", exact: true })).not.toHaveClass(/active/);
+  await expect(page.getByRole("link", { name: "Dates" })).toHaveClass(/active/);
   await expect(page.getByRole("button", { name: "Copy markdown" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Preview markdown" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Dates" }).locator("svg")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Labels" }).locator("svg")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Labels", exact: true }).locator("svg")).toBeVisible();
   await expect(page.getByRole("button", { name: savedTaskName, exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Calendar" }).click();
   await expect(page.getByLabel("Calendar view")).toBeVisible();
   await page.getByRole("button", { name: "List" }).click();
   await page.goto("/labels");
+  await expect(page.getByRole("button", { name: "Inbox", exact: true })).not.toHaveClass(/active/);
+  await expect(page.getByRole("link", { name: "Labels", exact: true })).toHaveClass(/active/);
   await expect(page.getByRole("button", { name: "Copy markdown" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Preview markdown" })).toHaveCount(0);
   await page.getByRole("button", { name: "Inbox", exact: true }).click();
@@ -93,7 +100,7 @@ test("task dialog, inline keyboard editing, navigation, search, and calendar wor
   await page.goto("/settings");
   const settingsNav = page.getByLabel("Navigation");
   await expect(settingsNav.getByRole("link", { name: "Dates" })).toBeVisible();
-  await expect(settingsNav.getByRole("link", { name: "Labels" })).toBeVisible();
+  await expect(settingsNav.getByRole("link", { name: "Labels", exact: true })).toBeVisible();
   await expect(settingsNav.getByRole("link", { name: renamedProject })).toBeVisible();
 
   await page.keyboard.press("q");

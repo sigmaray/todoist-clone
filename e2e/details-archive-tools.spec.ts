@@ -22,7 +22,9 @@ test("edits task details and copies all Markdown", async ({ context, page }) => 
   await page.getByRole("textbox", { name: "Search or type a command" }).fill(title);
   await page.locator(".search-palette .search-result").filter({ hasText: title }).click();
   const taskDialog = page.getByRole("dialog", { name: `Task details: ${title}` });
-  await expect(taskDialog.getByRole("link", { name: "Inbox", exact: true }).first()).toBeVisible();
+  await expect(taskDialog.getByRole("link", { name: "Inbox", exact: true })).toBeVisible();
+  await expect(taskDialog.locator(".task-details-breadcrumbs")).toHaveCount(0);
+  await expect(taskDialog.locator(".task-details-header-path")).toContainText(title);
   await taskDialog.getByRole("button", { name: "Edit task description" }).click();
   await page.getByLabel("Edit task description").fill("Task details saved from the dialog");
   await page.getByRole("button", { name: "Save" }).click();
@@ -38,10 +40,8 @@ test("edits task details and copies all Markdown", async ({ context, page }) => 
   await page.getByLabel("Add comment").fill("First comment");
   await page.getByRole("button", { name: "Add comment" }).click();
   await page.getByLabel("New subtask title").fill("Nested from details");
-  await page.getByRole("button", { name: "Add", exact: true }).click();
-  await taskDialog.getByRole("button", { name: "Change" }).click();
+  await page.getByLabel("New subtask title").press("Enter");
   await taskDialog.getByLabel("Project or Inbox").selectOption({ label: projectTitle });
-  await taskDialog.getByRole("button", { name: "Save" }).click();
   await expect(taskDialog.getByRole("link", { name: projectTitle, exact: true }).first()).toBeVisible();
   const projectHref = await taskDialog.getByRole("link", { name: projectTitle, exact: true }).first().getAttribute("href");
   if (projectHref === null) throw new Error("Missing project navigation link");

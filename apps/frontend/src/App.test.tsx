@@ -203,11 +203,10 @@ describe("TaskApp", () => {
     const dialog = screen.getByRole("dialog", { name: "Task details: Child task" });
     expect(within(dialog).getAllByRole("link", { name: "Inbox" })[0]).toHaveAttribute("href", "/");
     expect(within(dialog).getByRole("link", { name: "Parent task" })).toHaveAttribute("href", "/?task=parent-1");
-    await userEvent.click(within(dialog).getByRole("button", { name: "Change" }));
     await userEvent.selectOptions(within(dialog).getByLabelText("Project or Inbox"), "project:project-1");
-    await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(moveTask).toHaveBeenCalledWith("child-1", "project-1", null, null, null, null));
-    expect(within(dialog).getAllByRole("link", { name: "Roadmap" }).length).toBeGreaterThan(0);
+    expect(within(dialog).getByLabelText("Project or Inbox")).toHaveValue("project:project-1");
+    expect(within(dialog).queryByRole("navigation", { name: "Task location" })).not.toBeInTheDocument();
   });
 
   it("calls the create handler when a task is submitted", async () => {

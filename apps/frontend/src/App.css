@@ -1672,3 +1672,9 @@ body {
 @media (max-width: 700px) { .dates-calendar-day { min-height: 64px; padding: 4px; } .dates-calendar-day button { font-size: .72rem; } }
 .sidebar-settings-exports button { display: flex; align-items: center; gap: 8px; border: 0; padding: 7px 8px; color: #6d655f; background: transparent; text-align: left; cursor: pointer; }
 .sidebar-settings-exports button:hover { color: #b83f2d; background: #fff2ef; }
+.brand-mark { background: #d33f2f !important; }
+.task-details-modal .task-details-header-path { display: flex; align-items: center; gap: 9px; min-width: 0; color: #716a65; }
+.task-details-header-path a { color: #625952; text-decoration: none; }
+.task-details-header-path strong { overflow: hidden; color: #302c29; text-overflow: ellipsis; white-space: nowrap; }
+.task-details-modal .task-details-header { justify-content: space-between; }
+.task-details-sidebar select[aria-label="Project or Inbox"] { min-height: 38px; border: 0; padding: 7px 10px; background-color: transparent; color: #514a45; }
