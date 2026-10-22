@@ -7,8 +7,9 @@ test("edits task details and copies all Markdown", async ({ context, page }) => 
   page.on("dialog", (dialog) => dialog.accept());
   await page.goto("/");
   const projectTitle = unique("Task home");
-  await page.getByLabel("Project title").fill(projectTitle);
   await page.getByRole("button", { name: "Add project" }).click();
+  await page.getByLabel("Project title").fill(projectTitle);
+  await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("button", { name: projectTitle, exact: true })).toBeVisible();
   const title = unique("Detailed task");
   await page.getByRole("button", { name: /Add task/ }).click();
@@ -22,15 +23,28 @@ test("edits task details and copies all Markdown", async ({ context, page }) => 
   await page.getByRole("textbox", { name: "Search or type a command" }).fill(title);
   await page.locator(".search-palette .search-result").filter({ hasText: title }).click();
   const taskDialog = page.getByRole("dialog", { name: `Task details: ${title}` });
-  await expect(taskDialog.getByRole("link", { name: "Inbox", exact: true })).toBeVisible();
+  await expect(taskDialog.getByRole("link", { name: projectTitle, exact: true })).toBeVisible();
   await expect(taskDialog.locator(".task-details-breadcrumbs")).toHaveCount(0);
   await expect(taskDialog.locator(".task-details-header-path")).toContainText(title);
+  await taskDialog.getByRole("button", { name: "Edit task title" }).click();
+  await page.getByLabel("Edit task title").fill("unsaved title");
+  await page.getByLabel("Edit task title").press("Escape");
+  await expect(taskDialog.getByRole("button", { name: "Edit task title" })).toHaveText(title);
+  await taskDialog.getByRole("button", { name: "Edit task description" }).click();
+  await page.getByLabel("Edit task description").fill("unsaved description");
+  await page.getByLabel("Edit task description").press("Escape");
+  await expect(taskDialog.getByRole("button", { name: "Edit task description" })).toHaveText("Add description");
   await taskDialog.getByRole("button", { name: "Edit task description" }).click();
   await page.getByLabel("Edit task description").fill("Task details saved from the dialog");
   await page.getByRole("button", { name: "Save" }).click();
   await taskDialog.getByRole("button", { name: /Add date/ }).click();
-  await page.getByLabel("New date").fill("2026-11-01");
-  await page.getByRole("button", { name: "Save date" }).click();
+  await page.getByLabel("Type a date").fill("2026-11-01");
+  await page.getByLabel("Type a date").press("Escape");
+  await expect(taskDialog).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Choose date" })).toHaveCount(0);
+  await taskDialog.getByRole("button", { name: /Add date/ }).click();
+  await page.getByLabel("Type a date").fill("2026-11-01");
+  await page.getByLabel("Type a date").press("Enter");
   await taskDialog.getByRole("button", { name: "Add label" }).click();
   await page.getByLabel("Labels").fill("work");
   await page.keyboard.press("Enter");
@@ -81,8 +95,9 @@ test("edits task details and copies all Markdown", async ({ context, page }) => 
   await expect(page).toHaveURL("/");
   await page.goto("/labels");
   const navigationProjectTitle = unique("Navigate project");
-  await page.getByLabel("Project title").fill(navigationProjectTitle);
   await page.getByRole("button", { name: "Add project" }).click();
+  await page.getByLabel("Project title").fill(navigationProjectTitle);
+  await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("button", { name: navigationProjectTitle, exact: true })).toBeVisible();
   await page.goto("/dates");
   await page.getByRole("button", { name: navigationProjectTitle, exact: true }).click();
@@ -97,8 +112,9 @@ test("renaming projects and sections preserves their visual order after reload",
   await page.goto("/");
   const projectNames = [unique("Order project A"), unique("Order project B"), unique("Order project C")];
   for (const name of projectNames) {
-    await page.getByLabel("Project title").fill(name);
     await page.getByRole("button", { name: "Add project" }).click();
+    await page.getByLabel("Project title").fill(name);
+    await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
   }
   const renamedProject = `${projectNames[1]} updated`;
@@ -118,12 +134,24 @@ test("renaming projects and sections preserves their visual order after reload",
   await page.reload();
   await expect(page.getByRole("button", { name: renamedProject, exact: true })).toBeVisible();
   await verifyProjectOrder();
+  const sourceProjectRow = page.locator(".project-nav-row").filter({ has: page.getByRole("button", { name: projectNames[2], exact: true }) });
+  const targetProjectRow = page.locator(".project-nav-row").filter({ has: page.getByRole("button", { name: projectNames[0], exact: true }) });
+  await sourceProjectRow.dragTo(targetProjectRow, { targetPosition: { x: 24, y: 1 } });
+  await expect.poll(async () => {
+    const names = await projectOrder();
+    return names.indexOf(projectNames[2]) < names.indexOf(projectNames[0]);
+  }).toBe(true);
+  await page.reload();
+  await expect(page.getByRole("button", { name: projectNames[2], exact: true })).toBeVisible();
+  const persistedProjectNames = await projectOrder();
+  expect(persistedProjectNames.indexOf(projectNames[2])).toBeLessThan(persistedProjectNames.indexOf(projectNames[0]));
 
   await page.getByRole("button", { name: "Inbox", exact: true }).click();
   const sectionNames = [unique("Order section A"), unique("Order section B"), unique("Order section C")];
   for (const name of sectionNames) {
-    await page.getByLabel("Section title").fill(name);
     await page.getByRole("button", { name: "Add section" }).click();
+    await page.getByLabel("Section title").fill(name);
+    await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
   }
   const renamedSection = `${sectionNames[1]} updated`;
@@ -146,8 +174,9 @@ test("renaming projects and sections preserves their visual order after reload",
 test("archives and restores projects, and views table records", async ({ page }) => {
   await page.goto("/");
   const title = unique("Archive candidate");
-  await page.getByLabel("Project title").fill(title);
   await page.getByRole("button", { name: "Add project" }).click();
+  await page.getByLabel("Project title").fill(title);
+  await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("button", { name: title, exact: true })).toBeVisible();
   await page.getByRole("button", { name: title, exact: true }).click();
   const taskTitle = unique("Archived task");

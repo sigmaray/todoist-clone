@@ -12,13 +12,15 @@ const createTask = (page: Page) => async (title: string) => {
 };
 
 const createProject = (page: Page) => async (title: string) => {
-  await page.getByLabel("Project title").fill(title);
   await page.getByRole("button", { name: "Add project" }).click();
+  await page.getByLabel("Project title").fill(title);
+  await page.getByRole("button", { name: "Save", exact: true }).click();
 };
 
 const createSection = (page: Page) => async (title: string) => {
-  await page.getByLabel("Section title").fill(title);
   await page.getByRole("button", { name: "Add section" }).click();
+  await page.getByLabel("Section title").fill(title);
+  await page.getByRole("button", { name: "Save", exact: true }).click();
 };
 
 const dragTaskOntoTask = (page: Page) => async (sourceTitle: string, targetTitle: string) => {

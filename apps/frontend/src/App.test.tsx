@@ -68,6 +68,7 @@ const baseApi = (tasks: ReadonlyArray<TaskNode>): ApplicationApi =>
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z"
       }),
+    reorderProject: async (id) => project({ id, title: "Reordered" }),
     updateProject: async (id, title) => project({ id, title }),
     duplicateProject: async (id) => project({ id: `${id}-copy`, title: "Project copy" }),
     archiveProject: async (id, archived) => project({ id, title: "Project", archived }),
@@ -151,6 +152,7 @@ afterEach(() => {
 });
 
 beforeEach(() => {
+  window.history.replaceState({}, "", "/");
   vi.spyOn(window, "confirm").mockReturnValue(true);
 });
 
@@ -178,8 +180,8 @@ describe("TaskApp", () => {
     await userEvent.type(within(dialog).getByRole("textbox", { name: "Edit task description" }), "discard{Escape}");
     expect(within(dialog).getByRole("button", { name: "Edit task description" })).toHaveTextContent("Ship release");
     await userEvent.click(within(dialog).getByRole("button", { name: /Add date/ }));
-    await userEvent.type(within(dialog).getByLabelText("New date"), "2026-11-01");
-    await userEvent.click(within(dialog).getByRole("button", { name: "Save date" }));
+    await userEvent.type(screen.getByLabelText("Type a date"), "2026-11-01");
+    await userEvent.keyboard("{Enter}");
     await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", { dueDate: "2026-11-01" }));
     await userEvent.click(within(dialog).getByRole("button", { name: "Add label" }));
     await userEvent.type(within(dialog).getByLabelText("Labels"), "work{Enter}");
@@ -247,8 +249,9 @@ describe("TaskApp", () => {
       })
     );
 
-    await userEvent.type(screen.getByLabelText("Project title"), "Roadmap");
     await userEvent.click(screen.getByRole("button", { name: "Add project" }));
+    await userEvent.type(screen.getByLabelText("Project title"), "Roadmap");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
     await userEvent.click(await screen.findByRole("button", { name: "Roadmap" }));
     await userEvent.click(screen.getByRole("button", { name: /Add task/ }));
     await userEvent.type(screen.getByLabelText("New task title"), "Define milestones");
@@ -290,8 +293,9 @@ describe("TaskApp", () => {
       })
     );
 
-    await userEvent.type(screen.getByLabelText("Project title"), "Roadmap");
     await userEvent.click(screen.getByRole("button", { name: "Add project" }));
+    await userEvent.type(screen.getByLabelText("Project title"), "Roadmap");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(createProject).toHaveBeenCalledWith("Roadmap"));
     expect(await screen.findByRole("button", { name: "Roadmap" })).toBeInTheDocument();
@@ -352,8 +356,9 @@ describe("TaskApp", () => {
       })
     );
 
-    await userEvent.type(screen.getByLabelText("Section title"), "Later");
     await userEvent.click(screen.getByRole("button", { name: "Add section" }));
+    await userEvent.type(screen.getByLabelText("Section title"), "Later");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
     const dataTransfer = dragTask("Sort receipts");
     fireEvent.drop(await screen.findByLabelText("Section Later"), { dataTransfer });
@@ -372,8 +377,9 @@ describe("TaskApp", () => {
       })
     );
 
-    await userEvent.type(screen.getByLabelText("Section title"), "Someday");
     await userEvent.click(screen.getByRole("button", { name: "Add section" }));
+    await userEvent.type(screen.getByLabelText("Section title"), "Someday");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(createSection).toHaveBeenCalledWith("Someday", null));
     expect(await screen.findByRole("heading", { name: "Someday" })).toBeInTheDocument();
@@ -719,12 +725,14 @@ describe("Dates and Labels task views", () => {
 
   it("shows dated tasks and their labels with links into the label filter", async () => {
     window.history.replaceState({}, "", "/dates");
+    const datedParent = task({ id: "dated", title: "Dated note", dueDate: "2026-10-23", labels: Object.freeze(["work"]), children: Object.freeze([task({ id: "undated-child", title: "Undated child", parentId: "dated" })]) });
     renderApp(baseApi(Object.freeze([
-      task({ id: "dated", title: "Dated note", dueDate: "2026-10-23", labels: Object.freeze(["work"]) }),
+      datedParent,
       task({ id: "plain", title: "No date" })
     ])));
 
     expect(await screen.findByRole("button", { name: "Dated note" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Undated child" })).toBeInTheDocument();
     expect(screen.queryByText("No date")).not.toBeInTheDocument();
     expect(screen.getByText("2026-10-23")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "work" })).toHaveAttribute("href", "/labels?label=work");
@@ -732,12 +740,14 @@ describe("Dates and Labels task views", () => {
 
   it("filters tasks by selected label across the complete task list", async () => {
     window.history.replaceState({}, "", "/labels?label=work");
+    const labeledParent = task({ id: "match", title: "Project task", projectId: "p1", labels: Object.freeze(["work"]), children: Object.freeze([task({ id: "other-child", title: "Other label child", parentId: "match", labels: Object.freeze(["home"]) })]) });
     renderApp(baseApi(Object.freeze([
-      task({ id: "match", title: "Project task", projectId: "p1", labels: Object.freeze(["work"]) }),
+      labeledParent,
       task({ id: "other", title: "Other label", labels: Object.freeze(["home"]) })
     ])));
 
     expect(await screen.findByRole("button", { name: "Project task" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Other label child" })).toBeInTheDocument();
     expect(screen.queryByText("Other label")).not.toBeInTheDocument();
   });
 });

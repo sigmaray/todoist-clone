@@ -48,6 +48,8 @@ const patchProjectSchema = z.object({
   title: z.string().trim().min(1)
 });
 
+const reorderProjectSchema = z.object({ beforeId: z.string().nullable(), afterId: z.string().nullable() });
+
 const createSectionSchema = z.object({
   title: z.string().trim().min(1),
   projectId: z.string().nullable().default(null)
@@ -242,6 +244,13 @@ export const createApp = (
 
     const project = await repository.updateProject(context.req.param("id"), result.data.title);
 
+    return project === null ? context.json({ error: "Project not found" }, 404) : context.json({ project });
+  });
+
+  app.patch("/projects/:id/order", async (context) => {
+    const result = reorderProjectSchema.safeParse(await parseJson(context.req.raw));
+    if (!result.success) return context.json({ error: "Invalid project order" }, 400);
+    const project = await repository.reorderProject(context.req.param("id"), result.data.beforeId, result.data.afterId);
     return project === null ? context.json({ error: "Project not found" }, 404) : context.json({ project });
   });
 

@@ -135,6 +135,16 @@ export const createPostgresTaskRepository = (databaseUrl: string): TaskRepositor
 
       return project;
     },
+    reorderProject: async (id, beforeId, afterId) => {
+      const ordered = await db.select().from(projectsTable).orderBy(projectOrder);
+      const siblings = ordered.filter((project) => project.id !== id);
+      const beforeIndex = beforeId === null ? -1 : siblings.findIndex((project) => project.id === beforeId);
+      const afterIndex = afterId === null ? -1 : siblings.findIndex((project) => project.id === afterId);
+      const low = afterIndex >= 0 ? siblings[afterIndex]?.lexicalOrder ?? null : beforeId === null && afterId === null ? siblings.at(-1)?.lexicalOrder ?? null : null;
+      const high = beforeIndex >= 0 ? siblings[beforeIndex]?.lexicalOrder ?? null : null;
+      const rows = await db.update(projectsTable).set({ lexicalOrder: generateLexicalOrder(low, high), updatedAt: new Date() }).where(eq(projectsTable.id, id)).returning();
+      return firstProject(rows);
+    },
     updateProject: async (id, title) => {
       const rows = await db
         .update(projectsTable)

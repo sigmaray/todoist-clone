@@ -191,6 +191,19 @@ describe("POST /tasks", () => {
   });
 });
 
+describe("PATCH /projects/:id/order", () => {
+  it("persists the requested project order", async () => {
+    const agent = request(createTestServer());
+    const created = await Promise.all(["First", "Second", "Third"].map((title) => agent.post("/projects").send({ title }).expect(201)));
+    const [first, second, third] = created.map((response) => response.body.project);
+
+    await agent.patch(`/projects/${third.id}/order`).send({ beforeId: first.id, afterId: null }).expect(200);
+    const listed = await agent.get("/projects").expect(200);
+
+    expect(listed.body.projects.map((project: { id: string }) => project.id)).toEqual([third.id, first.id, second.id]);
+  });
+});
+
 describe("settings and session authentication", () => {
   it("defaults to delete confirmations and allows updating that preference", async () => {
     const settingsRepository = createMemorySettingsRepository();

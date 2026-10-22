@@ -247,12 +247,38 @@ const findTaskNode = (tasks: ReadonlyArray<TaskNode>, id: string): TaskNode | nu
 
 const filterTaskTree = (tasks: ReadonlyArray<TaskNode>, predicate: (task: TaskNode) => boolean): ReadonlyArray<TaskNode> =>
   Object.freeze(tasks.flatMap((task) => {
-    const children = filterTaskTree(task.children, predicate);
-    return predicate(task) ? [Object.freeze({ ...task, children })] : children;
+    if (predicate(task)) return [task];
+    return filterTaskTree(task.children, predicate);
   }));
 
 const flattenTaskNodes = (tasks: ReadonlyArray<TaskNode>): ReadonlyArray<Task> =>
   Object.freeze(tasks.flatMap((task) => [task, ...flattenTaskNodes(task.children)]));
+
+const isoDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
+const TaskDatePicker = ({ value, onSelect, onClose }: Readonly<{ value: string; onSelect: (date: string) => void; onClose: () => void }>) => {
+  const today = new Date();
+  const [month, setMonth] = useState(() => (value || isoDate(today)).slice(0, 7));
+  const [typedDate, setTypedDate] = useState(value);
+  const first = new Date(`${month}-01T00:00:00`);
+  const offset = (first.getDay() + 6) % 7;
+  const days = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+  const choose = (date: Date) => onSelect(isoDate(date));
+  const shiftMonth = (amount: number) => { const next = new Date(first); next.setMonth(next.getMonth() + amount); setMonth(isoDate(next).slice(0, 7)); };
+  const shortcuts = [
+    ["Today", today],
+    ["Tomorrow", new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1)],
+    ["This weekend", new Date(today.getFullYear(), today.getMonth(), today.getDate() + ((6 - today.getDay() + 7) % 7 || 7))],
+    ["Next week", new Date(today.getFullYear(), today.getMonth(), today.getDate() + (8 - today.getDay()) % 7 + (today.getDay() === 1 ? 7 : 0))]
+  ] as const;
+  return <section className="task-date-picker" role="dialog" aria-label="Choose date" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); } }}>
+    <input autoFocus aria-label="Type a date" placeholder="Type a date" value={typedDate} onChange={(event) => setTypedDate(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); if (/^\d{4}-\d{2}-\d{2}$/.test(typedDate)) onSelect(typedDate); } }} />
+    <div className="date-shortcuts">{shortcuts.map(([label, date]) => <button type="button" key={label} onClick={() => choose(date)}>{label}<span>{date.toLocaleDateString(undefined, { weekday: "short" })}</span></button>)}</div>
+    <header><button type="button" aria-label="Previous month" onClick={() => shiftMonth(-1)}>‹</button><strong>{first.toLocaleDateString(undefined, { month: "short", year: "numeric" })}</strong><button type="button" aria-label="Next month" onClick={() => shiftMonth(1)}>›</button></header>
+    <div className="date-calendar-grid">{"MTWTFSS".split("").map((day, index) => <span key={`${day}-${index}`}>{day}</span>)}{Array.from({ length: offset }, (_, index) => <i key={`blank-${index}`} />)}{Array.from({ length: days }, (_, index) => { const date = new Date(first.getFullYear(), first.getMonth(), index + 1); const dateValue = isoDate(date); return <button type="button" key={dateValue} aria-pressed={dateValue === value} onClick={() => choose(date)}>{index + 1}</button>; })}</div>
+    <button type="button" className="date-picker-cancel" onClick={onClose}>Cancel</button>
+  </section>;
+};
 
 const SearchPalette = ({ tasks, projects = Object.freeze([]), sections = Object.freeze([]), onTaskSelect }: Readonly<{ tasks: ReadonlyArray<Task>; projects?: ReadonlyArray<Project>; sections?: ReadonlyArray<Section>; onTaskSelect: (task: Task) => void }>) => {
   const [open, setOpen] = useState(false);
@@ -444,6 +470,8 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const [title, setTitle] = useState("");
   const [projectTitle, setProjectTitle] = useState("");
   const [sectionTitle, setSectionTitle] = useState("");
+  const [addingProject, setAddingProject] = useState(false);
+  const [addingSection, setAddingSection] = useState(false);
   const [editProjectId, setEditProjectId] = useState<ProjectId | null>(null);
   const [editProjectTitle, setEditProjectTitle] = useState("");
   const [editSectionId, setEditSectionId] = useState<SectionId | null>(null);
@@ -469,7 +497,8 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const [detailProjectId, setDetailProjectId] = useState<ProjectId | null>(null);
   const [editingDetailField, setEditingDetailField] = useState<"title" | "description" | null>(null);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
-  const detailDateInputRef = useRef<HTMLInputElement>(null);
+  const projectCreateInputRef = useRef<HTMLInputElement>(null);
+  const sectionCreateInputRef = useRef<HTMLInputElement>(null);
   const [detailComment, setDetailComment] = useState("");
   const [detailSubtask, setDetailSubtask] = useState("");
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
@@ -484,12 +513,8 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   );
 
   useEffect(() => { const syncPath = () => setCurrentPath(window.location.pathname); window.addEventListener("popstate", syncPath); return () => window.removeEventListener("popstate", syncPath); }, []);
-  useEffect(() => {
-    if (!datePickerOpen) return;
-    const input = detailDateInputRef.current;
-    input?.focus();
-    try { input?.showPicker(); } catch { /* Some browsers only allow showPicker from the click handler. */ }
-  }, [datePickerOpen]);
+  useEffect(() => { if (addingProject) projectCreateInputRef.current?.focus(); }, [addingProject]);
+  useEffect(() => { if (addingSection) sectionCreateInputRef.current?.focus(); }, [addingSection]);
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape" && detailsTaskId !== null && editingDetailField === null && !datePickerOpen && detailLabelInput === "") setDetailsTaskId(null);
@@ -547,6 +572,11 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     mutationFn: (nextTitle: string) => api.createProject(nextTitle),
     onSuccess: (project) => {
       setProjectTitle("");
+      setAddingProject(false);
+      setTargetProjectId(project.id);
+      setTargetSectionId(null);
+      window.history.pushState({}, "", `/?project=${encodeURIComponent(project.id)}`);
+      setCurrentPath("/");
       queryClient.setQueryData(projectQueryKey, (current: ReadonlyArray<Project> | undefined) => appendById(current, project));
     }
   });
@@ -583,6 +613,8 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   });
   const archiveProjectMutation = useMutation({ mutationFn: ({ id, archived }: Readonly<{ id: ProjectId; archived: boolean }>) => api.archiveProject(id, archived), onSuccess: (project) => queryClient.setQueryData(projectQueryKey, (current: ReadonlyArray<Project> | undefined) => replaceById(current, project)) });
 
+  const reorderProjectMutation = useMutation({ mutationFn: ({ id, beforeId, afterId }: Readonly<{ id: ProjectId; beforeId: ProjectId | null; afterId: ProjectId | null }>) => api.reorderProject(id, beforeId, afterId), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: projectQueryKey }); } });
+
   const requestProjectDelete = (project: Project) => {
     if (confirmDeletion(`Delete project “${project.title}” and all its tasks?`)) {
       deleteProjectMutation.mutate(project);
@@ -593,6 +625,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     mutationFn: (nextTitle: string) => api.createSection(nextTitle, null),
     onSuccess: (section) => {
       setSectionTitle("");
+      setAddingSection(false);
       queryClient.setQueryData(sectionQueryKey, (current: ReadonlyArray<Section> | undefined) => appendById(current, section));
     }
   });
@@ -720,6 +753,8 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     }
   };
 
+  const cancelProjectCreate = () => { setAddingProject(false); setProjectTitle(""); };
+
   const submitProjectEdit = (project: Project) => (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmed = editProjectTitle.trim();
@@ -743,6 +778,8 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
       createSectionMutation.mutate(trimmed);
     }
   };
+
+  const cancelSectionCreate = () => { setAddingSection(false); setSectionTitle(""); };
 
   const submitSectionEdit = (section: Section) => (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1019,7 +1056,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
           type="button"
           className={["nav-button", pageMode === "tasks" && targetProjectId === null && targetSectionId === null ? "active" : ""].filter(Boolean).join(" ")}
           onClick={() => {
-            if (pageMode !== "tasks") { window.history.pushState({}, "", "/"); setCurrentPath("/"); }
+            window.history.pushState({}, "", "/"); setCurrentPath("/");
             setTargetProjectId(null);
             setTargetSectionId(null);
           }}
@@ -1068,7 +1105,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
                 </button>
               </form>
             ) : (
-              <div key={project.id} className="project-nav-row">
+              <div key={project.id} className="project-nav-row" draggable onDragStart={(event) => { event.dataTransfer.setData("application/x-project-id", project.id); event.dataTransfer.effectAllowed = "move"; }} onDragOver={(event) => { if (event.dataTransfer.types.includes("application/x-project-id")) event.preventDefault(); }} onDrop={(event) => { const draggedId = event.dataTransfer.getData("application/x-project-id"); if (!draggedId || draggedId === project.id) return; event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); const placeBefore = event.clientY < rect.top + rect.height / 2; const index = activeProjects.findIndex((item) => item.id === project.id); const beforeId = placeBefore ? project.id : activeProjects[index + 1]?.id ?? null; const afterId = placeBefore ? activeProjects[index - 1]?.id ?? null : project.id; reorderProjectMutation.mutate({ id: draggedId, beforeId, afterId }); }}>
                 <button
                   type="button"
                   className={clsx(
@@ -1077,7 +1114,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
                     activeDropZone === projectPlacement(project.id) && "drop-active"
                   )}
                   onClick={() => {
-                    if (pageMode !== "tasks") { window.history.pushState({}, "", `/?project=${encodeURIComponent(project.id)}`); setCurrentPath("/"); }
+                    window.history.pushState({}, "", `/?project=${encodeURIComponent(project.id)}`); setCurrentPath("/");
                     setTargetProjectId(project.id);
                     setTargetSectionId(null);
                   }}
@@ -1101,12 +1138,11 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
             )
           )}
         </div>
-        <div className="card bg-light border p-3 sidebar-create-block">
-          <form className="compact-form m-0" onSubmit={submitProject}>
-            <label htmlFor="project-title">Project title</label>
-            <input id="project-title" value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} />
-            <button type="submit"><Plus size={16} aria-hidden="true" />Add project</button>
-          </form>
+        <div className="sidebar-create-block">
+          {addingProject ? <form className="inline-create-form" onSubmit={submitProject} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); cancelProjectCreate(); } }}>
+            <label htmlFor="project-title">Title</label><input ref={projectCreateInputRef} id="project-title" aria-label="Project title" value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} />
+            <div><button type="submit" className="btn-primary">Save</button><button type="button" onClick={cancelProjectCreate}>Cancel</button></div>
+          </form> : <button type="button" className="add-project-trigger" onClick={() => { setProjectTitle(""); setAddingProject(true); }}><Plus size={16} aria-hidden="true" />Add project</button>}
         </div>
         {pageMode === "tasks" ? <><button type="button" className="nav-button sidebar-export" onClick={exportZip}>
           <Archive size={16} aria-hidden="true" />
@@ -1170,12 +1206,11 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
               <h2>Inbox</h2>
               {inboxRootTasks.length > 0 ? renderTaskNodes(inboxRootTasks, taskActions) : <p className="empty">No inbox tasks yet.</p>}
             </section>
-            <div className="card bg-light border p-3 section-create-block">
-              <form className="compact-form inline m-0" onSubmit={submitSection}>
-                <label htmlFor="section-title">Section title</label>
-                <input id="section-title" value={sectionTitle} onChange={(event) => setSectionTitle(event.target.value)} />
-                <button type="submit"><Plus size={16} aria-hidden="true" />Add section</button>
-              </form>
+            <div className="section-create-block">
+              {addingSection ? <form className="inline-create-form" onSubmit={submitSection} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); cancelSectionCreate(); } }}>
+                <label htmlFor="section-title">Title</label><input ref={sectionCreateInputRef} id="section-title" aria-label="Section title" value={sectionTitle} onChange={(event) => setSectionTitle(event.target.value)} />
+                <div><button type="submit" className="btn-primary">Save</button><button type="button" onClick={cancelSectionCreate}>Cancel</button></div>
+              </form> : <button type="button" className="add-section-trigger" onClick={() => { setSectionTitle(""); setAddingSection(true); }}><Plus size={16} aria-hidden="true" />Add section</button>}
             </div>
             {inboxSections.map((section) => {
               const sectionTasks = allTasks.filter((task) => task.projectId === null && task.sectionId === section.id);
@@ -1292,8 +1327,8 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
             <div className="task-details-layout">
               <div className="task-details-main">
                 <div className="task-detail-editable">
-                  {editingDetailField === "title" ? <div className="task-detail-editor"><input autoFocus aria-label="Edit task title" value={detailTitle} onChange={(event) => setDetailTitle(event.target.value)} onKeyDown={async (event) => { if (event.key === "Escape") { setDetailTitle(selectedDetailsTask.title); setEditingDetailField(null); } if (event.key === "Enter") { event.preventDefault(); const value = detailTitle.trim(); if (value && await saveTaskDetails({ title: value })) setEditingDetailField(null); } }} /><div><button type="button" onClick={() => { setDetailTitle(selectedDetailsTask.title); setEditingDetailField(null); }}>Cancel</button><button type="button" className="btn-primary" onClick={async () => { const value = detailTitle.trim(); if (value && await saveTaskDetails({ title: value })) setEditingDetailField(null); }}>Save</button></div></div> : <button type="button" className="task-detail-title-display" aria-label="Edit task title" onClick={() => { setDetailTitle(selectedDetailsTask.title); setEditingDetailField("title"); }}>{selectedDetailsTask.title}</button>}
-                  {editingDetailField === "description" ? <div className="task-detail-editor"><textarea autoFocus aria-label="Edit task description" value={detailDescription} onChange={(event) => setDetailDescription(event.target.value)} rows={4} onKeyDown={async (event) => { if (event.key === "Escape") { setDetailDescription(selectedDetailsTask.description); setEditingDetailField(null); } if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); if (await saveTaskDetails({ description: detailDescription })) setEditingDetailField(null); } }} /><div><button type="button" onClick={() => { setDetailDescription(selectedDetailsTask.description); setEditingDetailField(null); }}>Cancel</button><button type="button" className="btn-primary" onClick={async () => { if (await saveTaskDetails({ description: detailDescription })) setEditingDetailField(null); }}>Save</button></div></div> : <button type="button" className="task-detail-description-display" aria-label="Edit task description" onClick={() => { setDetailDescription(selectedDetailsTask.description); setEditingDetailField("description"); }}>{selectedDetailsTask.description || "Add description"}</button>}
+                  {editingDetailField === "title" ? <div className="task-detail-editor"><input autoFocus aria-label="Edit task title" value={detailTitle} onChange={(event) => setDetailTitle(event.target.value)} onKeyDown={async (event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setDetailTitle(selectedDetailsTask.title); setEditingDetailField(null); } if (event.key === "Enter") { event.preventDefault(); const value = detailTitle.trim(); if (value && await saveTaskDetails({ title: value })) setEditingDetailField(null); } }} /><div><button type="button" onClick={() => { setDetailTitle(selectedDetailsTask.title); setEditingDetailField(null); }}>Cancel</button><button type="button" className="btn-primary" onClick={async () => { const value = detailTitle.trim(); if (value && await saveTaskDetails({ title: value })) setEditingDetailField(null); }}>Save</button></div></div> : <button type="button" className="task-detail-title-display" aria-label="Edit task title" onClick={() => { setDetailTitle(selectedDetailsTask.title); setEditingDetailField("title"); }}>{selectedDetailsTask.title}</button>}
+                  {editingDetailField === "description" ? <div className="task-detail-editor"><textarea autoFocus aria-label="Edit task description" value={detailDescription} onChange={(event) => setDetailDescription(event.target.value)} rows={4} onKeyDown={async (event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setDetailDescription(selectedDetailsTask.description); setEditingDetailField(null); } if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); if (await saveTaskDetails({ description: detailDescription })) setEditingDetailField(null); } }} /><div><button type="button" onClick={() => { setDetailDescription(selectedDetailsTask.description); setEditingDetailField(null); }}>Cancel</button><button type="button" className="btn-primary" onClick={async () => { if (await saveTaskDetails({ description: detailDescription })) setEditingDetailField(null); }}>Save</button></div></div> : <button type="button" className="task-detail-description-display" aria-label="Edit task description" onClick={() => { setDetailDescription(selectedDetailsTask.description); setEditingDetailField("description"); }}>{selectedDetailsTask.description || "Add description"}</button>}
                 </div>
                 <fieldset><legend>Subtasks</legend>
 
@@ -1315,7 +1350,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
                 <p className="task-autosave-status" aria-live="polite">{detailSaveStatus}</p>
               </aside>
             </div>
-            {datePickerOpen ? <div className="task-date-picker-backdrop"><section className="task-date-picker" role="dialog" aria-modal="true" aria-label="Change date" onKeyDown={async (event) => { if (event.key === "Escape") { setDetailDueDate(selectedDetailsTask.dueDate ?? ""); setDatePickerOpen(false); } if (event.key === "Enter") { event.preventDefault(); if (await saveTaskDetails({ dueDate: detailDueDate || null })) setDatePickerOpen(false); } }}><h3>{selectedDetailsTask.dueDate ? "Change date" : "Add date"}</h3><input ref={detailDateInputRef} autoFocus type="date" aria-label="New date" value={detailDueDate} onChange={(event) => setDetailDueDate(event.target.value)} /><div><button type="button" onClick={() => { setDetailDueDate(selectedDetailsTask.dueDate ?? ""); setDatePickerOpen(false); }}>Cancel</button><button type="button" className="btn-primary" onClick={async () => { if (await saveTaskDetails({ dueDate: detailDueDate || null })) setDatePickerOpen(false); }}>Save date</button></div></section></div> : null}
+            {datePickerOpen ? <div className="task-date-picker-backdrop"><TaskDatePicker value={detailDueDate} onClose={() => { setDetailDueDate(selectedDetailsTask.dueDate ?? ""); setDatePickerOpen(false); }} onSelect={async (date) => { setDetailDueDate(date); if (await saveTaskDetails({ dueDate: date || null })) setDatePickerOpen(false); }} /></div> : null}
           </section>
         </div>
       ) : null}

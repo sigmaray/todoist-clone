@@ -25,6 +25,7 @@ export type TaskRepository = Readonly<{
   list: () => Promise<ReadonlyArray<Task>>;
   listProjects: () => Promise<ReadonlyArray<Project>>;
   createProject: (title: string) => Promise<Project>;
+  reorderProject: (id: ProjectId, beforeId: ProjectId | null, afterId: ProjectId | null) => Promise<Project | null>;
   updateProject: (id: ProjectId, title: string) => Promise<Project | null>;
   deleteProject: (id: ProjectId) => Promise<boolean>;
   duplicateProject: (id: ProjectId) => Promise<Project | null>;
@@ -110,6 +111,18 @@ export const createMemoryTaskRepository = (
       projects = Object.freeze([...projects, project]);
 
       return project;
+    },
+    reorderProject: async (id, beforeId, afterId) => {
+      const ordered = projects.filter((project) => project.id !== id).toSorted((left, right) => left.lexicalOrder < right.lexicalOrder ? -1 : left.lexicalOrder > right.lexicalOrder ? 1 : 0);
+      const beforeIndex = beforeId === null ? -1 : ordered.findIndex((project) => project.id === beforeId);
+      const afterIndex = afterId === null ? -1 : ordered.findIndex((project) => project.id === afterId);
+      const low = afterIndex >= 0 ? ordered[afterIndex]?.lexicalOrder ?? null : beforeId === null && afterId === null ? ordered.at(-1)?.lexicalOrder ?? null : null;
+      const high = beforeIndex >= 0 ? ordered[beforeIndex]?.lexicalOrder ?? null : null;
+      const existing = projects.find((project) => project.id === id);
+      if (!existing) return null;
+      const reordered = Object.freeze({ ...existing, lexicalOrder: generateLexicalOrder(low, high), updatedAt: now() });
+      projects = Object.freeze(projects.map((project) => project.id === id ? reordered : project).toSorted((left, right) => left.lexicalOrder < right.lexicalOrder ? -1 : left.lexicalOrder > right.lexicalOrder ? 1 : 0));
+      return reordered;
     },
     updateProject: async (id, title) => {
       const existing = projects.find((project) => project.id === id);

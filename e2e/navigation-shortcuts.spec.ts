@@ -7,8 +7,13 @@ test("task dialog, inline keyboard editing, navigation, search, and calendar wor
   await page.goto("/");
 
   const project = unique("Keyboard project");
-  await page.getByLabel("Project title").fill(project);
   await page.getByRole("button", { name: "Add project" }).click();
+  await expect(page.getByLabel("Project title")).toBeFocused();
+  await page.getByLabel("Project title").fill("cancel this project");
+  await page.getByLabel("Project title").press("Escape");
+  await page.getByRole("button", { name: "Add project" }).click();
+  await page.getByLabel("Project title").fill(project);
+  await page.getByLabel("Project title").press("Enter");
   await expect(page.getByRole("button", { name: project, exact: true })).toBeVisible();
 
   const taskName = unique("Keyboard task");
@@ -56,8 +61,13 @@ test("task dialog, inline keyboard editing, navigation, search, and calendar wor
 
   await page.getByRole("button", { name: "Inbox", exact: true }).click();
   const sectionName = unique("Section");
-  await page.getByLabel("Section title").fill(sectionName);
   await page.getByRole("button", { name: "Add section" }).click();
+  await expect(page.getByLabel("Section title")).toBeFocused();
+  await page.getByLabel("Section title").fill("cancel this section");
+  await page.getByLabel("Section title").press("Escape");
+  await page.getByRole("button", { name: "Add section" }).click();
+  await page.getByLabel("Section title").fill(sectionName);
+  await page.getByLabel("Section title").press("Enter");
   await page.getByRole("button", { name: `Edit section ${sectionName}` }).click();
   await expect(page.locator('input[id^="section-edit-"]')).toBeFocused();
   await page.locator('input[id^="section-edit-"]').fill("discard section");

@@ -4,6 +4,7 @@ export type TaskApi = Readonly<{
   listTasks: () => Promise<ReadonlyArray<TaskNode>>;
   listProjects: () => Promise<ReadonlyArray<Project>>;
   createProject: (title: string) => Promise<Project>;
+  reorderProject: (id: ProjectId, beforeId: ProjectId | null, afterId: ProjectId | null) => Promise<Project>;
   updateProject: (id: ProjectId, title: string) => Promise<Project>;
   duplicateProject: (id: ProjectId) => Promise<Project>;
   archiveProject: (id: ProjectId, archived: boolean) => Promise<Project>;
@@ -107,6 +108,10 @@ export const createTaskApi = (baseUrl = ""): ApplicationApi =>
     createProject: async (title) => {
       const data = await postJson<{ project: Project }>(`${baseUrl}/projects`, { title });
 
+      return data.project;
+    },
+    reorderProject: async (id, beforeId, afterId) => {
+      const data = await readJson<{ project: Project }>(await fetch(`${baseUrl}/projects/${id}/order`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ beforeId, afterId }) }));
       return data.project;
     },
     updateProject: async (id, title) => {
