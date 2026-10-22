@@ -53,7 +53,11 @@ test("edits task details and copies all Markdown", async ({ context, page }) => 
   const dateDialog = page.getByRole("dialog", { name: "Change date" });
   await expect(dateDialog.getByRole("button", { name: "Today" })).toBeVisible();
   await expect(dateDialog.getByRole("button", { name: "Tomorrow" })).toBeVisible();
+  const todayCell = dateDialog.locator('[aria-current="date"]');
+  await expect(todayCell).toBeVisible();
+  await expect.poll(() => todayCell.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe("rgb(255, 214, 208)");
   await dateDialog.getByRole("button", { name: "Today" }).click();
+  await expect.poll(() => dateDialog.locator('[aria-pressed="true"]').evaluate((element) => getComputedStyle(element).boxShadow)).toContain("rgb(200, 58, 45)");
   await expect(dateDialog).toBeVisible();
   await expect(page.getByLabel("New date")).toHaveValue(new Date().toLocaleDateString("en-CA"));
   await dateDialog.getByRole("button", { name: "Save date" }).click();

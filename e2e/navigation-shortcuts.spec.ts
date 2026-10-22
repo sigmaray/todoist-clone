@@ -32,7 +32,7 @@ test("task dialog, inline keyboard editing, navigation, search, and calendar wor
   await expect(addDateDialog.locator('[role="grid"]')).toBeVisible();
   const todayCell = addDateDialog.locator('[aria-current="date"]');
   await expect(todayCell).toBeVisible();
-  await expect.poll(() => todayCell.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe("rgb(255, 240, 237)");
+  await expect.poll(() => todayCell.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe("rgb(255, 214, 208)");
   await addDateDialog.getByLabel("New task date").fill("2026-11-18");
   const selectedDay = addDateDialog.locator('[aria-pressed="true"]');
   await expect(selectedDay).toBeVisible();

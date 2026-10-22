@@ -1766,8 +1766,8 @@ body {
 /* Restore the date state colors after the shared dialog button styling. */
 .task-date-picker .date-picker-grid [role="gridcell"] button { box-sizing: border-box; width: 34px; height: 34px; border: 1px solid transparent; border-radius: 50%; padding: 0; color: #302c29; background: transparent; font: inherit; font-weight: 400; }
 .task-details-modal .task-date-picker .date-picker-grid [role="gridcell"] button.today:not(.selected),
-.add-task-dialog .task-date-picker .date-picker-grid [role="gridcell"] button.today:not(.selected) { border-color: #c83a2d; color: #a62e24; background: #fff0ed; font-weight: 700; }
+.add-task-dialog .task-date-picker .date-picker-grid [role="gridcell"] button.today:not(.selected) { border: 2px solid #c83a2d !important; color: #9f241a !important; background: #ffd6d0 !important; font-weight: 750; }
 .task-details-modal .task-date-picker .date-picker-grid [role="gridcell"] button.selected,
-.add-task-dialog .task-date-picker .date-picker-grid [role="gridcell"] button.selected { border-color: #d6362b; color: #fff; background: #d6362b; font-weight: 700; box-shadow: 0 0 0 2px #fff, 0 0 0 4px #d6362b; }
+.add-task-dialog .task-date-picker .date-picker-grid [role="gridcell"] button.selected { border: 1px solid #d6362b !important; color: #fff !important; background: #d6362b !important; font-weight: 700; box-shadow: 0 0 0 2px #fff, 0 0 0 4px #d6362b; }
 .task-details-modal .task-date-picker .date-picker-grid [role="gridcell"] button.today.selected,
-.add-task-dialog .task-date-picker .date-picker-grid [role="gridcell"] button.today.selected { box-shadow: 0 0 0 2px #fff, 0 0 0 4px #a62e24; }
+.add-task-dialog .task-date-picker .date-picker-grid [role="gridcell"] button.today.selected { box-shadow: 0 0 0 2px #fff, 0 0 0 4px #c83a2d; }
