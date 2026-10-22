@@ -15,7 +15,9 @@ const createTask = (page: Page) => async (title: string) => {
 const createProject = (page: Page) => async (title: string) => {
   await page.getByRole("button", { name: "Add project" }).click();
   await page.getByLabel("Project title").fill(title);
+  const createdResponse = page.waitForResponse((response) => response.url().endsWith("/projects") && response.request().method() === "POST");
   await page.getByRole("button", { name: "Save", exact: true }).click();
+  expect((await createdResponse).ok()).toBe(true);
 };
 
 const dragProjectTo = (page: Page) => async (sourceTitle: string, targetTitle: string, yRatio: number) => {
@@ -63,11 +65,12 @@ const createSection = (page: Page) => async (title: string) => {
 };
 
 const dragTaskOntoTask = (page: Page) => async (sourceTitle: string, targetTitle: string) => {
-  await page.getByText(sourceTitle).locator("..").evaluate(
-    (sourceRow, target) => {
+  await page.getByRole("button", { name: sourceTitle, exact: true }).evaluate(
+    (sourceElement, target) => {
+      const sourceRow = sourceElement.closest(".task-row");
       const targetRow = [...document.querySelectorAll(".task-row")]
         .find((row) => row.textContent?.includes(target));
-      const taskId = sourceRow.getAttribute("data-task-id");
+      const taskId = sourceRow?.getAttribute("data-task-id") ?? null;
       const dataTransfer = new DataTransfer();
 
       if (targetRow === undefined || taskId === null) {
@@ -79,22 +82,23 @@ const dragTaskOntoTask = (page: Page) => async (sourceTitle: string, targetTitle
       const middleX = rect.left + Math.max(48, rect.width / 3);
 
       dataTransfer.setData("text/task-id", taskId);
-      sourceRow.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer, clientX: middleX, clientY: middleY }));
+      sourceRow?.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer, clientX: middleX, clientY: middleY }));
       targetRow.dispatchEvent(new DragEvent("dragenter", { bubbles: true, dataTransfer, clientX: middleX, clientY: middleY }));
       targetRow.dispatchEvent(new DragEvent("dragover", { bubbles: true, dataTransfer, clientX: middleX, clientY: middleY }));
       targetRow.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer, clientX: middleX, clientY: middleY }));
-      sourceRow.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer, clientX: middleX, clientY: middleY }));
+      sourceRow?.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer, clientX: middleX, clientY: middleY }));
     },
     targetTitle
   );
 };
 
 const dragTaskBeforeTask = (page: Page) => async (sourceTitle: string, targetTitle: string) => {
-  await page.getByText(sourceTitle).locator("..").evaluate(
-    (sourceRow, target) => {
+  await page.getByRole("button", { name: sourceTitle, exact: true }).evaluate(
+    (sourceElement, target) => {
+      const sourceRow = sourceElement.closest(".task-row");
       const targetRow = [...document.querySelectorAll(".task-row")]
         .find((row) => row.textContent?.includes(target));
-      const taskId = sourceRow.getAttribute("data-task-id");
+      const taskId = sourceRow?.getAttribute("data-task-id") ?? null;
       const dataTransfer = new DataTransfer();
 
       if (targetRow === undefined || taskId === null) {
@@ -106,22 +110,23 @@ const dragTaskBeforeTask = (page: Page) => async (sourceTitle: string, targetTit
       const middleX = rect.left + Math.max(48, rect.width / 3);
 
       dataTransfer.setData("text/task-id", taskId);
-      sourceRow.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer, clientX: middleX, clientY: topY }));
+      sourceRow?.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer, clientX: middleX, clientY: topY }));
       targetRow.dispatchEvent(new DragEvent("dragenter", { bubbles: true, dataTransfer, clientX: middleX, clientY: topY }));
       targetRow.dispatchEvent(new DragEvent("dragover", { bubbles: true, dataTransfer, clientX: middleX, clientY: topY }));
       targetRow.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer, clientX: middleX, clientY: topY }));
-      sourceRow.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer, clientX: middleX, clientY: topY }));
+      sourceRow?.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer, clientX: middleX, clientY: topY }));
     },
     targetTitle
   );
 };
 
 const dragTaskOverProject = (page: Page) => async (sourceTitle: string, projectTitle: string) => {
-  await page.getByText(sourceTitle).locator("..").evaluate(
-    (sourceRow, title) => {
-      const projectButton = [...document.querySelectorAll("button")]
+  await page.getByRole("button", { name: sourceTitle, exact: true }).evaluate(
+    (sourceElement, title) => {
+      const sourceRow = sourceElement.closest(".task-row");
+      const projectButton = [...document.querySelectorAll(".project-nav-row > button.nav-button")]
         .find((button) => button.textContent?.trim() === title);
-      const taskId = sourceRow.getAttribute("data-task-id");
+      const taskId = sourceRow?.getAttribute("data-task-id") ?? null;
       const dataTransfer = new DataTransfer();
 
       if (projectButton === undefined || taskId === null) {
@@ -129,7 +134,7 @@ const dragTaskOverProject = (page: Page) => async (sourceTitle: string, projectT
       }
 
       dataTransfer.setData("text/task-id", taskId);
-      sourceRow.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer }));
+      sourceRow?.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer }));
       projectButton.dispatchEvent(new DragEvent("dragenter", { bubbles: true, dataTransfer }));
       projectButton.dispatchEvent(new DragEvent("dragover", { bubbles: true, dataTransfer }));
     },
@@ -138,8 +143,10 @@ const dragTaskOverProject = (page: Page) => async (sourceTitle: string, projectT
 };
 
 const dragTaskLeftOnItself = (page: Page) => async (title: string) => {
-  await page.getByText(title).locator("..").evaluate((sourceRow) => {
-    const taskId = sourceRow.getAttribute("data-task-id");
+  await page.getByRole("button", { name: title, exact: true }).evaluate((sourceElement) => {
+    const sourceRow = sourceElement.closest<HTMLElement>(".task-row");
+    const taskId = sourceRow?.getAttribute("data-task-id") ?? null;
+    if (sourceRow === null) throw new Error("Unable to find task row");
     const rect = sourceRow.getBoundingClientRect();
     const dataTransfer = new DataTransfer();
 
@@ -157,11 +164,12 @@ const dragTaskLeftOnItself = (page: Page) => async (title: string) => {
 };
 
 const dragTaskToRegion = (page: Page) => async (sourceTitle: string, regionLabel: string) => {
-  await page.getByText(sourceTitle).locator("..").evaluate(
-    (sourceRow, label) => {
+  await page.getByRole("button", { name: sourceTitle, exact: true }).evaluate(
+    (sourceElement, label) => {
+      const sourceRow = sourceElement.closest(".task-row");
       const region = [...document.querySelectorAll("[aria-label]")]
         .find((element) => element.getAttribute("aria-label") === label);
-      const taskId = sourceRow.getAttribute("data-task-id");
+      const taskId = sourceRow?.getAttribute("data-task-id") ?? null;
       const dataTransfer = new DataTransfer();
 
       if (region === undefined || taskId === null) {
@@ -169,10 +177,10 @@ const dragTaskToRegion = (page: Page) => async (sourceTitle: string, regionLabel
       }
 
       dataTransfer.setData("text/task-id", taskId);
-      sourceRow.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer }));
+      sourceRow?.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer }));
       region.dispatchEvent(new DragEvent("dragover", { bubbles: true, dataTransfer }));
       region.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer }));
-      sourceRow.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer }));
+      sourceRow?.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer }));
     },
     regionLabel
   );
@@ -365,12 +373,13 @@ test("creates projects, sections, subtasks, and exports markdown", async ({ cont
     )
     .toBe(true);
 
-  await page.getByText(firstOrderTask).locator("..").focus();
+  const firstOrderRow = page.locator(".task-row").filter({ has: page.getByRole("button", { name: firstOrderTask, exact: true }) });
+  await firstOrderRow.focus();
   await page.keyboard.press(process.platform === "darwin" ? "Meta+ArrowRight" : "Control+ArrowRight");
-  await expect(page.getByText(firstOrderTask).locator("..")).toHaveCSS("padding-left", "20px");
-  await page.getByText(firstOrderTask).locator("..").focus();
+  await expect(firstOrderRow).toHaveCSS("padding-left", "20px");
+  await firstOrderRow.focus();
   await page.keyboard.press(process.platform === "darwin" ? "Meta+ArrowLeft" : "Control+ArrowLeft");
-  await expect(page.getByText(firstOrderTask).locator("..")).toHaveCSS("padding-left", "0px");
+  await expect(firstOrderRow).toHaveCSS("padding-left", "0px");
 
   const dragParent = `Drag parent ${suffix}`;
   const dragChild = `Drag child ${suffix}`;
@@ -378,9 +387,10 @@ test("creates projects, sections, subtasks, and exports markdown", async ({ cont
   await createTask(page)(dragParent);
   await createTask(page)(dragChild);
   await dragTaskOntoTask(page)(dragChild, dragParent);
-  await expect(page.getByText(dragChild).locator("..")).toHaveCSS("padding-left", "20px");
+  const dragChildRow = page.locator(".task-row").filter({ has: page.getByRole("button", { name: dragChild, exact: true }) });
+  await expect(dragChildRow).toHaveCSS("padding-left", "20px");
   await dragTaskLeftOnItself(page)(dragChild);
-  await expect(page.getByText(dragChild).locator("..")).toHaveCSS("padding-left", "0px");
+  await expect(dragChildRow).toHaveCSS("padding-left", "0px");
 
   await page.getByRole("button", { name: "Export", exact: true }).click();
   await page.getByRole("button", { name: "Copy markdown" }).click();
@@ -514,14 +524,13 @@ test("nests a project with touch dragging in the mobile sidebar", async ({ page 
   await page.goto("/");
   await page.getByRole("button", { name: "Open navigation" }).click();
   await createProject(page)(targetTitle);
+  await page.getByRole("button", { name: "Open navigation" }).click();
   await createProject(page)(sourceTitle);
+  await page.getByRole("button", { name: "Open navigation" }).click();
 
   const sourceRow = page.locator(".project-nav-row").filter({ has: page.getByRole("button", { name: sourceTitle, exact: true }) });
   const targetRow = page.locator(".project-nav-row").filter({ has: page.getByRole("button", { name: targetTitle, exact: true }) });
   const sourceHandle = sourceRow.getByRole("button", { name: `Drag project ${sourceTitle}` });
-  const sourceBox = await sourceHandle.boundingBox();
-  const targetBox = await targetRow.boundingBox();
-  if (!sourceBox || !targetBox) throw new Error("Mobile project drag handles must be visible");
   const sourceId = await sourceRow.getAttribute("data-project-id");
   const targetId = await targetRow.getAttribute("data-project-id");
   if (!sourceId || !targetId) throw new Error("Project rows must expose their IDs");
@@ -529,14 +538,28 @@ test("nests a project with touch dragging in the mobile sidebar", async ({ page 
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
   try {
+    await sourceHandle.scrollIntoViewIfNeeded();
+    const sourceBox = await sourceHandle.boundingBox();
+    if (!sourceBox || !(await targetRow.boundingBox())) throw new Error("Mobile project drag handles must be visible");
     await cdp.send("Input.dispatchTouchEvent", {
       type: "touchStart",
       touchPoints: [{ id: 1, x: sourceBox.x + sourceBox.width / 2, y: sourceBox.y + sourceBox.height / 2 }]
     });
-    await cdp.send("Input.dispatchTouchEvent", {
-      type: "touchMove",
-      touchPoints: [{ id: 1, x: targetBox.x + targetBox.width / 2, y: targetBox.y + targetBox.height / 2 }]
-    });
+    await expect(sourceRow).toHaveClass(/project-dragging/);
+    const currentTargetBox = await targetRow.boundingBox();
+    if (!currentTargetBox) throw new Error("Mobile project drop target must remain visible");
+    const start = Object.freeze({ x: sourceBox.x + sourceBox.width / 2, y: sourceBox.y + sourceBox.height / 2 });
+    const finish = Object.freeze({ x: currentTargetBox.x + currentTargetBox.width / 2, y: currentTargetBox.y + currentTargetBox.height / 2 });
+    for (const progress of [0.25, 0.5, 0.75, 1]) {
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [{
+          id: 1,
+          x: start.x + (finish.x - start.x) * progress,
+          y: start.y + (finish.y - start.y) * progress
+        }]
+      });
+    }
     await expect(targetRow).toHaveClass(/project-drop-inside/);
     const movedProjectResponse = page.waitForResponse((response) =>
       response.url().endsWith(`/projects/${sourceId}/parent`) && response.request().method() === "PATCH"
@@ -555,21 +578,29 @@ test("keeps the shared mobile sidebar consistent and closes it after navigation"
   const projectTitle = `Shared sidebar project ${Date.now()}-${testInfo.workerIndex}`;
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
+  await page.getByRole("button", { name: "Open navigation" }).click();
   await createProject(page)(projectTitle);
 
-  const sidebar = page.getByRole("navigation", { name: "Navigation" });
+  const sidebar = page.locator("aside.sidebar[aria-label='Navigation']");
   const expectSidebarClosed = async () => {
     await expect(sidebar).not.toHaveClass(/mobile-sidebar-open/);
     await expect(page.getByRole("button", { name: "Open navigation" })).toHaveAttribute("aria-expanded", "false");
   };
   const selectNavigationItem = async (name: string, expectedPath: string) => {
+    await expectSidebarClosed();
     await page.getByRole("button", { name: "Open navigation" }).click();
     await expect(sidebar).toHaveClass(/mobile-sidebar-open/);
-    await sidebar.getByRole("link", { name, exact: true }).click();
+    const item = name === "Inbox"
+      ? sidebar.getByRole("button", { name, exact: true })
+      : sidebar.getByRole("link", { name, exact: true });
+    await item.evaluate((element: HTMLElement) => element.click());
     await expect(page).toHaveURL(new RegExp(`${expectedPath.replaceAll("/", "\\/")}(?:\\?.*)?$`));
     await expectSidebarClosed();
+    await page.getByRole("button", { name: "Open navigation" }).click();
     await expect(sidebar.getByRole("link", { name: "Settings", exact: true })).toBeVisible();
-    await expect(sidebar.locator(".project-nav-row").filter({ has: page.getByRole("link", { name: projectTitle, exact: true }) }).getByRole("button", { name: `Drag project ${projectTitle}` })).toBeVisible();
+    await expect(sidebar.locator(".project-nav-row").filter({ has: page.getByRole("button", { name: projectTitle, exact: true }) }).getByRole("button", { name: `Drag project ${projectTitle}` })).toBeVisible();
+    await sidebar.getByRole("button", { name: "Close navigation" }).click();
+    await expectSidebarClosed();
   };
 
   await selectNavigationItem("Dates", "/dates");

@@ -106,7 +106,18 @@ test("task dialog, inline keyboard editing, navigation, search, and calendar wor
   await page.getByRole("button", { name: "Add section" }).click();
   await page.getByLabel("Section title").fill(secondSectionName);
   await page.getByLabel("Section title").press("Enter");
-  await page.locator(`section[aria-label="Section ${secondSectionName}"] .section-header`).dragTo(page.locator(`section[aria-label="Section ${renamedSection}"] .section-header`), { targetPosition: { x: 12, y: 1 } });
+  await page.locator(`section[aria-label="Section ${secondSectionName}"] .section-header`).evaluate((source, targetName) => {
+    const target = document.querySelector<HTMLElement>(`section[aria-label="Section ${CSS.escape(targetName)}"] .section-header`);
+    if (target === null) throw new Error("Section drop target was not found");
+    const transfer = new DataTransfer();
+    const rect = target.getBoundingClientRect();
+    const clientY = rect.top + 1;
+    source.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: transfer }));
+    target.dispatchEvent(new DragEvent("dragenter", { bubbles: true, dataTransfer: transfer, clientY }));
+    target.dispatchEvent(new DragEvent("dragover", { bubbles: true, dataTransfer: transfer, clientY }));
+    target.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer: transfer, clientY }));
+    source.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer: transfer }));
+  }, renamedSection);
   await expect.poll(() => page.locator('section[aria-label^="Section "]').evaluateAll((sections, names: Readonly<{ first: string; second: string }>) => sections.findIndex((section) => section.getAttribute("aria-label") === `Section ${names.second}`) < sections.findIndex((section) => section.getAttribute("aria-label") === `Section ${names.first}`), { first: renamedSection, second: secondSectionName })).toBe(true);
 
   await page.keyboard.press("Control+k");
@@ -150,7 +161,7 @@ test("task dialog, inline keyboard editing, navigation, search, and calendar wor
   await expect(settingsNav.getByRole("button", { name: /Export all/ })).toHaveCount(0);
   await expect(settingsNav.getByRole("link", { name: "Dates" })).toBeVisible();
   await expect(settingsNav.getByRole("link", { name: "Labels", exact: true })).toBeVisible();
-  await expect(settingsNav.getByRole("link", { name: renamedProject })).toBeVisible();
+  await expect(settingsNav.getByRole("button", { name: renamedProject })).toBeVisible();
 
   await page.keyboard.press("q");
   const quickDialog = page.getByRole("dialog", { name: "Add task" });

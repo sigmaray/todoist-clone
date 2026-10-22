@@ -564,6 +564,7 @@ const AppSidebar = ({ api, selectedProjectId = null, onInboxSelect, onProjectSel
   const [openProjectMenuId, setOpenProjectMenuId] = useState<ProjectId | null>(null);
   const draggedProjectRef = useRef<ProjectId | null>(null);
   const mobileProjectDropRef = useRef<Readonly<{ id: ProjectId; position: "before" | "after" | "inside" }> | null>(null);
+  const projectCreateInputRef = useRef<HTMLInputElement>(null);
   const projectsQuery = useQuery({ queryKey: projectQueryKey, queryFn: api?.listProjects ?? (async () => Object.freeze([])), enabled: api !== null });
   const tasksQuery = useQuery({ queryKey: taskQueryKey, queryFn: api?.listTasks ?? (async () => Object.freeze([])), enabled: api !== null });
   const sectionsQuery = useQuery({ queryKey: sectionQueryKey, queryFn: api?.listSections ?? (async () => Object.freeze([])), enabled: api !== null });
@@ -575,7 +576,9 @@ const AppSidebar = ({ api, selectedProjectId = null, onInboxSelect, onProjectSel
   const allSections = sectionsQuery.data ?? Object.freeze([]);
   const closeSidebar = () => setMobileSidebarOpen(false);
 
-  useEffect(() => { setMobileSidebarOpen(false); }, [location.pathname, location.search]);
+  useEffect(() => { if (addingProject) projectCreateInputRef.current?.focus(); }, [addingProject]);
+
+  useLayoutEffect(() => { setMobileSidebarOpen(false); }, [location.pathname, location.search]);
   useEffect(() => {
     if (openProjectMenuId === null) return;
     const closeOnOutsidePointer = (event: globalThis.PointerEvent) => {
@@ -693,6 +696,7 @@ const AppSidebar = ({ api, selectedProjectId = null, onInboxSelect, onProjectSel
     event.preventDefault();
     const title = projectTitle.trim();
     if (api === null || title.length === 0) return;
+    await queryClient.cancelQueries({ queryKey: projectQueryKey });
     const created = await api.createProject(title, newProjectParentId);
     queryClient.setQueryData(projectQueryKey, (current: ReadonlyArray<Project> | undefined) => appendById(current, created));
     setProjectTitle("");
@@ -704,7 +708,7 @@ const AppSidebar = ({ api, selectedProjectId = null, onInboxSelect, onProjectSel
     event.preventDefault();
     const title = editProjectTitle.trim();
     if (api === null || title.length === 0) return;
-    const updated = await api.updateProject(project.id, { id: project.id, title });
+    const updated = await api.updateProject(project.id, { title });
     queryClient.setQueryData(projectQueryKey, (current: ReadonlyArray<Project> | undefined) => replaceById(current, updated));
     setEditProjectId(null);
     setEditProjectTitle("");
@@ -736,12 +740,12 @@ const AppSidebar = ({ api, selectedProjectId = null, onInboxSelect, onProjectSel
     ]);
     if (selectedProjectId === project.id) onInboxSelect?.();
   };
-  const activePage = location.pathname === "/tools" ? "tools"
-    : location.pathname === "/settings" ? "settings"
-      : location.pathname === "/archived-projects" ? "archived-projects"
-        : location.pathname === "/dates" ? "dates"
-          : location.pathname === "/labels" ? "labels"
-            : location.pathname === "/export" ? "export"
+  const activePage = location.pathname.startsWith("/tools") ? "tools"
+    : location.pathname.startsWith("/settings") ? "settings"
+      : location.pathname.startsWith("/archived-projects") ? "archived-projects"
+        : location.pathname.startsWith("/dates") ? "dates"
+          : location.pathname.startsWith("/labels") ? "labels"
+            : location.pathname.startsWith("/export") ? "export"
               : location.pathname === "/" ? "tasks" : "";
   const handleTaskSelect = (task: Task) => {
     closeSidebar();
@@ -762,7 +766,7 @@ const AppSidebar = ({ api, selectedProjectId = null, onInboxSelect, onProjectSel
       {onAddTask !== undefined
         ? <button type="button" className="nav-button add-task-nav-button" onClick={() => { closeSidebar(); onAddTask(); }}><Plus size={17} aria-hidden="true" />Add task <kbd>Q</kbd></button>
         : <Link className="nav-button add-task-nav-button" to="/?addTask=1" onClick={closeSidebar}><Plus size={17} aria-hidden="true" />Add task <kbd>Q</kbd></Link>}
-      <Link className={clsx("nav-button", activePage === "tasks" && selectedProjectId === null && "active", isProjectDropActive?.(null) && "drop-active")} to="/" onClick={() => { closeSidebar(); onInboxSelect?.(); }} onDragEnter={onInboxDragEnter} onDragOver={onInboxDragOver} onDragLeave={onInboxDragLeave} onDrop={onInboxDrop}><Inbox size={16} aria-hidden="true" />Inbox</Link>
+      <button type="button" className={clsx("nav-button", activePage === "tasks" && selectedProjectId === null && "active", isProjectDropActive?.(null) && "drop-active")} onClick={() => { closeSidebar(); onInboxSelect?.(); navigate("/"); }} onDragEnter={onInboxDragEnter} onDragOver={onInboxDragOver} onDragLeave={onInboxDragLeave} onDrop={onInboxDrop}><Inbox size={16} aria-hidden="true" />Inbox</button>
       {navLink("/dates", "Dates", <CalendarDays size={16} aria-hidden="true" />, "dates")}
       {navLink("/labels", "Labels", <Tag size={16} aria-hidden="true" />, "labels")}
       {navLink("/export", "Export", <Download size={16} aria-hidden="true" />, "export")}
@@ -797,7 +801,7 @@ const AppSidebar = ({ api, selectedProjectId = null, onInboxSelect, onProjectSel
       {api !== null ? <div className="sidebar-create-block">
         {addingProject ? <form className="inline-create-form" onSubmit={(event) => void createProject(event)} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setAddingProject(false); setProjectTitle(""); setNewProjectParentId(null); } }}>
           {newProjectParentId !== null ? <p>Subproject of {activeProjects.find((project) => project.id === newProjectParentId)?.title}</p> : null}
-          <label htmlFor="project-title">Title</label><input id="project-title" aria-label="Project title" value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} />
+          <label htmlFor="project-title">Title</label><input ref={projectCreateInputRef} id="project-title" aria-label="Project title" value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} />
           <div><button type="submit" className="btn-primary">Save</button><button type="button" onClick={() => { setAddingProject(false); setProjectTitle(""); setNewProjectParentId(null); }}>Cancel</button></div>
         </form> : <button type="button" className="add-project-trigger" onClick={() => { setNewProjectParentId(null); setProjectTitle(""); setAddingProject(true); }}><Plus size={16} aria-hidden="true" />Add project</button>}
       </div> : null}
@@ -1219,13 +1223,13 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     event.dataTransfer.effectAllowed = "move";
   };
   const markSectionDrop = (section: Section) => (event: DragEvent<HTMLElement>) => {
-    if (!event.dataTransfer.types.includes("application/x-section-id")) return;
+    if (!event.dataTransfer.types.includes("application/x-section-id") && draggingSectionId === null) return;
     event.preventDefault();
     const rect = event.currentTarget.getBoundingClientRect();
     setActiveSectionDrop(Object.freeze({ id: section.id, position: event.clientY < rect.top + rect.height / 2 ? "before" : "after" }));
   };
   const dropSection = (section: Section, siblings: ReadonlyArray<Section>) => (event: DragEvent<HTMLElement>) => {
-    const draggedId = event.dataTransfer.getData("application/x-section-id");
+    const draggedId = event.dataTransfer.getData("application/x-section-id") || draggingSectionId;
     if (!draggedId || draggedId === section.id) return;
     event.preventDefault();
     const position = event.clientY < event.currentTarget.getBoundingClientRect().top + event.currentTarget.getBoundingClientRect().height / 2 ? "before" : "after";
@@ -1740,7 +1744,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   return (
     <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={finishDndDrag}>
     <main className="shell app-layout">
-      <AppSidebar api={api} selectedProjectId={targetProjectId} onInboxSelect={() => { setTargetProjectId(null); setTargetSectionId(null); }} onProjectSelect={(id) => { setTargetProjectId(id); setTargetSectionId(null); }} onTaskSelect={(task) => { const node = findTaskNode(allTasks, task.id); if (node !== null) openDetails(node); }} onAddTask={() => openAddTaskDialog(pageMode === "tasks" ? (targetSectionId === null ? targetProjectId === null ? inboxPlacement : projectPlacement(targetProjectId) : sectionPlacement(targetSectionId)) : inboxPlacement)} isProjectDropActive={(id) => activeDropZone === (id === null ? inboxPlacement : projectPlacement(id))} onInboxDragEnter={markDropZone(null, null)} onInboxDragOver={markDropZone(null, null)} onInboxDragLeave={() => setActiveDropZone(null)} onInboxDrop={moveDroppedTask(null, null)} onProjectDragEnter={(id) => markDropZone(id, null)} onProjectDragOver={(id) => markDropZone(id, null)} onProjectDragLeave={() => setActiveDropZone(null)} onProjectDrop={(id) => moveDroppedTask(id, null)} />
+      <AppSidebar api={api} selectedProjectId={targetProjectId} onInboxSelect={() => { setTargetProjectId(null); setTargetSectionId(null); }} onProjectSelect={(id) => { setTargetProjectId(id); setTargetSectionId(null); }} onTaskSelect={(task) => { const node = findTaskNode(allTasks, task.id); if (node !== null) openDetails(node); }} onAddTask={() => openAddTaskDialog(pageMode === "tasks" ? (targetSectionId === null ? targetProjectId === null ? inboxPlacement : projectPlacement(targetProjectId) : sectionPlacement(targetSectionId)) : inboxPlacement)} isProjectDropActive={(id) => activeDropZone === (id === null ? inboxPlacement : projectPlacement(id))} onInboxDragEnter={markDropZone(null, null)} onInboxDragOver={markDropZone(null, null)} onInboxDragLeave={() => setActiveDropZone(null)} onInboxDrop={moveDroppedTask(null, null)} onProjectDragEnter={(id) => markDropZone(id, null)} onProjectDragOver={(id) => markDropZone(id, null)} onProjectDragLeave={() => () => setActiveDropZone(null)} onProjectDrop={(id) => moveDroppedTask(id, null)} />
 
       <section className="workspace card shadow-sm" aria-label="Task manager">
         <header className="header">
@@ -1816,7 +1820,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
                   onDrop={moveDroppedTask(null, section.id)}
                   aria-label={`Section ${section.title}`}
                 >
-                  <div className={clsx("section-header", draggingSectionId === section.id && "section-dragging", activeSectionDrop?.id === section.id && `section-drop-${activeSectionDrop.position}`)} draggable={editSectionId !== section.id} onDragStart={startSectionDrag(section)} onDragEnd={() => { setDraggingSectionId(null); setActiveSectionDrop(null); }} onDragOver={markSectionDrop(section)} onDragLeave={() => setActiveSectionDrop(null)} onDrop={dropSection(section, inboxSections)}>
+                  <div className={clsx("section-header", draggingSectionId === section.id && "section-dragging", activeSectionDrop?.id === section.id && `section-drop-${activeSectionDrop.position}`)} draggable={editSectionId !== section.id} onDragStart={startSectionDrag(section)} onDragEnd={() => { setDraggingSectionId(null); setActiveSectionDrop(null); }} onDragEnter={markSectionDrop(section)} onDragOver={markSectionDrop(section)} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setActiveSectionDrop(null); }} onDrop={dropSection(section, inboxSections)}>
                     {editSectionId === section.id ? (
                       <form className="section-edit-form" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setEditSectionId(null); setEditSectionTitle(""); } }} onSubmit={submitSectionEdit(section)}>
                         <label htmlFor={`section-edit-${section.id}`}>Section title</label>
@@ -1889,7 +1893,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
             {projectSections.map((section) => {
               const sectionTasks = allTasks.filter((task) => task.projectId === targetProjectId && task.sectionId === section.id);
               return <section key={section.id} className={clsx("drop-zone", activeDropZone === sectionPlacement(section.id) && "drop-active")} onDragEnter={markDropZone(targetProjectId, section.id)} onDragOver={markDropZone(targetProjectId, section.id)} onDragLeave={() => setActiveDropZone(null)} onDrop={moveDroppedTask(targetProjectId, section.id)} aria-label={`Section ${section.title}`}>
-                <div className={clsx("section-header", draggingSectionId === section.id && "section-dragging", activeSectionDrop?.id === section.id && `section-drop-${activeSectionDrop.position}`)} draggable={editSectionId !== section.id} onDragStart={startSectionDrag(section)} onDragEnd={() => { setDraggingSectionId(null); setActiveSectionDrop(null); }} onDragOver={markSectionDrop(section)} onDragLeave={() => setActiveSectionDrop(null)} onDrop={dropSection(section, projectSections)}>
+                <div className={clsx("section-header", draggingSectionId === section.id && "section-dragging", activeSectionDrop?.id === section.id && `section-drop-${activeSectionDrop.position}`)} draggable={editSectionId !== section.id} onDragStart={startSectionDrag(section)} onDragEnd={() => { setDraggingSectionId(null); setActiveSectionDrop(null); }} onDragEnter={markSectionDrop(section)} onDragOver={markSectionDrop(section)} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setActiveSectionDrop(null); }} onDrop={dropSection(section, projectSections)}>
                   {editSectionId === section.id ? <form className="section-edit-form" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setEditSectionId(null); setEditSectionTitle(""); } }} onSubmit={submitSectionEdit(section)}>
                     <label htmlFor={`section-edit-${section.id}`}>Section title</label><input id={`section-edit-${section.id}`} autoFocus value={editSectionTitle} onChange={(event) => setEditSectionTitle(event.target.value)} />
                     <button type="submit">Save section</button><button type="button" onClick={() => { setEditSectionId(null); setEditSectionTitle(""); }}>Cancel</button>

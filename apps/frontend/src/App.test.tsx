@@ -165,6 +165,23 @@ beforeEach(() => {
 });
 
 describe("TaskApp", () => {
+  it("closes the mobile sidebar after each route selection", async () => {
+    const user = userEvent.setup();
+    renderApp(baseApi(Object.freeze([])));
+    const sidebar = screen.getByRole("complementary", { name: "Navigation" });
+    const menuToggle = screen.getByRole("button", { name: "Open navigation" });
+
+    await user.click(menuToggle);
+    expect(sidebar).toHaveClass("mobile-sidebar-open");
+    await user.click(within(sidebar).getByRole("link", { name: "Dates" }));
+    await waitFor(() => expect(sidebar).not.toHaveClass("mobile-sidebar-open"));
+
+    await user.click(menuToggle);
+    expect(sidebar).toHaveClass("mobile-sidebar-open");
+    await user.click(within(sidebar).getByRole("link", { name: "Settings" }));
+    await waitFor(() => expect(sidebar).not.toHaveClass("mobile-sidebar-open"));
+  });
+
   it("renders a task list", async () => {
     renderApp(baseApi(Object.freeze([task({ id: "1", title: "Plan MVP" })])));
 
@@ -345,7 +362,7 @@ describe("TaskApp", () => {
     await userEvent.type(editInput, "Launch plan");
     await userEvent.click(screen.getByRole("button", { name: "Save project" }));
 
-    await waitFor(() => expect(updateProject).toHaveBeenCalledWith("project-1", { id: "project-1", title: "Launch plan" }));
+    await waitFor(() => expect(updateProject).toHaveBeenCalledWith("project-1", { title: "Launch plan" }));
 
     await userEvent.click(screen.getByLabelText("Project menu Launch plan"));
     await userEvent.click(await screen.findByRole("button", { name: "Delete" }));
@@ -897,7 +914,7 @@ describe("ToolsPage", () => {
     expect(await screen.findByText("Database Tools")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "View records" }));
     await waitFor(() => expect(screen.getByText(/"limit": "10"/)).toBeInTheDocument());
-    expect(screen.getByRole("link", { name: "Inbox" })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("button", { name: "Inbox" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Tools" })).toHaveAttribute("href", "/tools");
     await userEvent.click(screen.getByRole("button", { name: "Clear selected table" }));
 
