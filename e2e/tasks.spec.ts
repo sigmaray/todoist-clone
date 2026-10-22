@@ -6,8 +6,9 @@ test.beforeEach(async ({ page }) => {
 });
 
 const createTask = (page: Page) => async (title: string) => {
-  await page.getByLabel(/Task title/).fill(title);
-  await page.getByRole("button", { name: "Add task" }).click();
+  await page.getByRole("button", { name: "Add task Q" }).click();
+  await page.getByLabel("New task title").fill(title);
+  await page.getByRole("button", { name: "Add task", exact: true }).click();
 };
 
 const createProject = (page: Page) => async (title: string) => {

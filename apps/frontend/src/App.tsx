@@ -12,9 +12,10 @@ import {
 import type { Project, ProjectId, Section, SectionId, Task, TaskId, TaskNode } from "@todoist-clone/domain";
 import clsx from "clsx";
 import JSZip from "jszip";
-import { Archive, ClipboardCopy, Code2, Copy, Database, Download, Edit3, Eye, Inbox, KeyRound, MoreHorizontal, Plus, Settings, Trash2, X } from "lucide-react";
+import { Archive, CalendarDays, ClipboardCopy, Code2, Copy, Database, Download, Edit3, Eye, Inbox, KeyRound, MoreHorizontal, Plus, Search, Settings, Tag, Trash2, X } from "lucide-react";
 import type { DragEvent, FormEvent, KeyboardEvent, ReactElement } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import "./vendor/bootstrap.min.css";
 import { createTaskApi, createToolsApi } from "./api";
 import type { AppSettings, ApplicationApi, ToolsApi } from "./api";
@@ -109,6 +110,7 @@ const renderTaskNodes = (
           {actions.editTaskId === task.id ? (
             <form
               className="edit-panel"
+              onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); actions.cancelEdit(); } }}
               onSubmit={(event) => {
                 event.preventDefault();
                 actions.submitEdit(task);
@@ -145,7 +147,7 @@ const renderTaskNodes = (
               </div>
             </form>
           ) : (
-            <button type="button" className={task.completed ? "task-title completed" : "task-title"} onClick={() => actions.openDetails(task)}>{task.title}</button>
+            <><button type="button" className={task.completed ? "task-title completed" : "task-title"} onClick={() => actions.openDetails(task)}>{task.title}</button>{task.dueDate || task.labels.length > 0 ? <span className="task-meta-list">{task.dueDate ? <time dateTime={task.dueDate} title={`Due ${task.dueDate}`}>{task.dueDate}</time> : null}{task.labels.map((label) => <a className="task-label" key={label} href={`/labels?label=${encodeURIComponent(label)}`}>{label}</a>)}</span> : null}</>
           )}
           <button type="button" className="task-action" aria-label={`Edit task ${task.title}`} onClick={() => actions.startEditing(task)}>
             <Edit3 size={14} aria-hidden="true" />
@@ -232,14 +234,76 @@ const removeById = <TItem extends Readonly<{ id: string }>>(
 ): ReadonlyArray<TItem> =>
   Object.freeze((items ?? Object.freeze([])).filter((existing) => existing.id !== id));
 
+const replaceById = <TItem extends Readonly<{ id: string }>>(
+  items: ReadonlyArray<TItem> | undefined,
+  item: TItem
+): ReadonlyArray<TItem> => Object.freeze((items ?? Object.freeze([])).map((existing) => existing.id === item.id ? item : existing));
+
 const findTaskNode = (tasks: ReadonlyArray<TaskNode>, id: string): TaskNode | null =>
   tasks.reduce<TaskNode | null>(
     (found, task) => found ?? (task.id === id ? task : findTaskNode(task.children, id)),
     null
   );
 
+const filterTaskTree = (tasks: ReadonlyArray<TaskNode>, predicate: (task: TaskNode) => boolean): ReadonlyArray<TaskNode> =>
+  Object.freeze(tasks.flatMap((task) => {
+    const children = filterTaskTree(task.children, predicate);
+    return predicate(task) ? [Object.freeze({ ...task, children })] : children;
+  }));
+
 const flattenTaskNodes = (tasks: ReadonlyArray<TaskNode>): ReadonlyArray<Task> =>
   Object.freeze(tasks.flatMap((task) => [task, ...flattenTaskNodes(task.children)]));
+
+const SearchPalette = ({ tasks, projects = Object.freeze([]), sections = Object.freeze([]), onTaskSelect }: Readonly<{ tasks: ReadonlyArray<Task>; projects?: ReadonlyArray<Project>; sections?: ReadonlyArray<Section>; onTaskSelect: (task: Task) => void }>) => {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const taskResults = normalizedQuery.length === 0 ? Object.freeze([]) : tasks.filter((task) =>
+    [task.title, task.description, ...task.labels].some((value) => value.toLocaleLowerCase().includes(normalizedQuery))
+  );
+  const labels = Array.from(new Set(tasks.flatMap((task) => task.labels)))
+    .filter((label) => normalizedQuery.length > 0 && label.toLocaleLowerCase().includes(normalizedQuery));
+  const projectResults = projects.filter((project) => normalizedQuery.length > 0 && project.title.toLocaleLowerCase().includes(normalizedQuery));
+  const sectionResults = sections.filter((section) => normalizedQuery.length > 0 && section.title.toLocaleLowerCase().includes(normalizedQuery));
+
+  useEffect(() => {
+    const handleShortcut = (event: globalThis.KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setOpen(true);
+      } else if (event.key === "Escape") {
+        setOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, []);
+
+  useEffect(() => {
+    if (open) inputRef.current?.focus();
+    else setQuery("");
+  }, [open]);
+
+  return <>
+    <button type="button" className="nav-button search-nav-button" onClick={() => setOpen(true)}><Search size={16} aria-hidden="true" />Search <kbd>Ctrl K</kbd></button>
+    {open ? createPortal(
+      <div className="search-palette-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false); }}>
+        <section className="search-palette" role="dialog" aria-modal="true" aria-label="Search">
+          <div className="search-palette-input"><Search size={20} aria-hidden="true" /><input ref={inputRef} aria-label="Search or type a command" placeholder="Search tasks, labels, or go to…" value={query} onChange={(event) => setQuery(event.target.value)} /><kbd>Ctrl</kbd><kbd>K</kbd></div>
+          {normalizedQuery ? <div className="search-palette-results">
+            {taskResults.length ? <><h2>Tasks</h2>{taskResults.slice(0, 30).map((task) => <button className="search-result" type="button" key={task.id} onClick={() => { onTaskSelect(task); setOpen(false); }}><span className="search-result-icon">○</span><span className="search-result-main"><strong>{task.title}</strong>{task.description ? <small>{task.description}</small> : null}</span>{task.labels.length ? <small>{task.labels.map((label) => `#${label}`).join(" ")}</small> : null}</button>)}</> : null}
+            {labels.length ? <><h2>Labels</h2>{labels.map((label) => <a className="search-result" key={label} href={`/labels?label=${encodeURIComponent(label)}`} onClick={() => setOpen(false)}><span className="search-result-icon">◇</span><strong>{label}</strong></a>)}</> : null}
+            {projectResults.length ? <><h2>Projects</h2>{projectResults.map((project) => <a className="search-result" key={project.id} href={`/?project=${encodeURIComponent(project.id)}`} onClick={() => setOpen(false)}><span className="search-result-icon">#</span><strong>{project.title}</strong></a>)}</> : null}
+            {sectionResults.length ? <><h2>Sections</h2>{sectionResults.map((section) => <a className="search-result" key={section.id} href={section.projectId ? `/?project=${encodeURIComponent(section.projectId)}` : "/"} onClick={() => setOpen(false)}><span className="search-result-icon">☷</span><strong>{section.title}</strong></a>)}</> : null}
+            {!taskResults.length && !labels.length && !projectResults.length && !sectionResults.length ? <p className="search-empty">No matching tasks, labels, projects, or sections.</p> : null}
+          </div> : <div className="search-palette-navigation"><h2>Navigation</h2>{[{ label: "Go to Inbox", href: "/" }, { label: "Go to Dates", href: "/dates" }, { label: "Go to Labels", href: "/labels" }].map((item) => <a className="search-result" key={item.href} href={item.href} onClick={() => setOpen(false)}><span className="search-result-icon">⌂</span><strong>{item.label}</strong></a>)}</div>}
+        </section>
+      </div>,
+      document.body
+    ) : null}
+  </>;
+};
 
 const hasDescendant = (task: TaskNode, id: string): boolean =>
   task.children.some((child) => child.id === id || hasDescendant(child, id));
@@ -368,6 +432,15 @@ const downloadBlob = (blob: Blob, filename: string) => {
 };
 
 export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
+  const [currentPath, setCurrentPath] = useState(window.location.pathname);
+  const [dateView, setDateView] = useState<"list" | "calendar">("list");
+  const [calendarMonth, setCalendarMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [addTaskOpen, setAddTaskOpen] = useState(false);
+  const [addTaskTitle, setAddTaskTitle] = useState("");
+  const [addTaskDescription, setAddTaskDescription] = useState("");
+  const [addTaskDate, setAddTaskDate] = useState("");
+  const [addTaskLabels, setAddTaskLabels] = useState("");
+  const [addTaskProjectId, setAddTaskProjectId] = useState<ProjectId | null>(null);
   const [title, setTitle] = useState("");
   const [projectTitle, setProjectTitle] = useState("");
   const [sectionTitle, setSectionTitle] = useState("");
@@ -380,7 +453,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
   const [activeDragTarget, setActiveDragTarget] = useState<ActiveDragTarget | null>(null);
   const [activeDropZone, setActiveDropZone] = useState<DropZoneId | null>(null);
-  const [targetProjectId, setTargetProjectId] = useState<ProjectId | null>(null);
+  const [targetProjectId, setTargetProjectId] = useState<ProjectId | null>(() => new URLSearchParams(window.location.search).get("project"));
   const [targetSectionId, setTargetSectionId] = useState<SectionId | null>(null);
   const [editTaskId, setEditTaskId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
@@ -391,6 +464,12 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const [detailDescription, setDetailDescription] = useState("");
   const [detailDueDate, setDetailDueDate] = useState("");
   const [detailLabels, setDetailLabels] = useState("");
+  const [detailLabelInput, setDetailLabelInput] = useState("");
+  const [detailSaveStatus, setDetailSaveStatus] = useState("");
+  const [detailProjectId, setDetailProjectId] = useState<ProjectId | null>(null);
+  const [editingDetailField, setEditingDetailField] = useState<"title" | "description" | null>(null);
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const [editingProject, setEditingProject] = useState(false);
   const [detailComment, setDetailComment] = useState("");
   const [detailSubtask, setDetailSubtask] = useState("");
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
@@ -404,6 +483,21 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
+  useEffect(() => { const syncPath = () => setCurrentPath(window.location.pathname); window.addEventListener("popstate", syncPath); return () => window.removeEventListener("popstate", syncPath); }, []);
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape" && detailsTaskId !== null && editingDetailField === null && !datePickerOpen && detailLabelInput === "" && !editingProject) setDetailsTaskId(null);
+      const target = event.target;
+      const isTyping = target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+      if (!isTyping && detailsTaskId === null && markdownModal === null && !addTaskOpen && !event.ctrlKey && !event.metaKey && !event.altKey && ["q", "й"].includes(event.key.toLocaleLowerCase())) {
+        event.preventDefault();
+        setAddTaskProjectId(currentPath === "/" ? targetProjectId : null);
+        setAddTaskTitle(""); setAddTaskDescription(""); setAddTaskDate(""); setAddTaskLabels(""); setAddTaskOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [detailsTaskId, markdownModal, addTaskOpen, editingDetailField, datePickerOpen, detailLabelInput, editingProject, targetProjectId, currentPath]);
   const tasks = useQuery({
     queryKey: taskQueryKey,
     queryFn: api.listTasks
@@ -456,7 +550,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     onSuccess: (project) => {
       setEditProjectId(null);
       setEditProjectTitle("");
-      queryClient.setQueryData(projectQueryKey, (current: ReadonlyArray<Project> | undefined) => appendById(current, project));
+      queryClient.setQueryData(projectQueryKey, (current: ReadonlyArray<Project> | undefined) => replaceById(current, project));
     }
   });
 
@@ -481,7 +575,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
       ]);
     }
   });
-  const archiveProjectMutation = useMutation({ mutationFn: ({ id, archived }: Readonly<{ id: ProjectId; archived: boolean }>) => api.archiveProject(id, archived), onSuccess: (project) => queryClient.setQueryData(projectQueryKey, (current: ReadonlyArray<Project> | undefined) => appendById(current, project)) });
+  const archiveProjectMutation = useMutation({ mutationFn: ({ id, archived }: Readonly<{ id: ProjectId; archived: boolean }>) => api.archiveProject(id, archived), onSuccess: (project) => queryClient.setQueryData(projectQueryKey, (current: ReadonlyArray<Project> | undefined) => replaceById(current, project)) });
 
   const requestProjectDelete = (project: Project) => {
     if (confirmDeletion(`Delete project “${project.title}” and all its tasks?`)) {
@@ -502,7 +596,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     onSuccess: (section) => {
       setEditSectionId(null);
       setEditSectionTitle("");
-      queryClient.setQueryData(sectionQueryKey, (current: ReadonlyArray<Section> | undefined) => appendById(current, section));
+      queryClient.setQueryData(sectionQueryKey, (current: ReadonlyArray<Section> | undefined) => replaceById(current, section));
     }
   });
 
@@ -768,6 +862,12 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     setDetailDescription(task.description);
     setDetailDueDate(task.dueDate ?? "");
     setDetailLabels(task.labels.join(", "));
+    setDetailLabelInput("");
+    setDetailSaveStatus("");
+    setDetailProjectId(task.projectId);
+    setEditingDetailField(null);
+    setDatePickerOpen(false);
+    setEditingProject(false);
   };
 
   const submitEdit = (task: TaskNode) => {
@@ -780,10 +880,44 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
 
   const allTasks = tasks.data ?? Object.freeze([]);
   const flatTasks = flattenTaskNodes(allTasks);
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("addTask") === "1") { setAddTaskProjectId(targetProjectId); setAddTaskOpen(true); window.history.replaceState({}, "", window.location.pathname); }
+    const taskId = new URLSearchParams(window.location.search).get("task");
+    const task = taskId === null ? null : findTaskNode(allTasks, taskId);
+    if (task !== null) {
+      openDetails(task);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [allTasks]);
   const allProjects = projects.data ?? Object.freeze([]);
   const activeProjects = allProjects.filter((project) => !project.archived);
   const allSections = sections.data ?? Object.freeze([]);
   const selectedDetailsTask = detailsTaskId === null ? null : findTaskNode(allTasks, detailsTaskId);
+  const selectedDetailsProject = detailProjectId === null
+    ? null
+    : allProjects.find((project) => project.id === detailProjectId) ?? null;
+  const selectedDetailsParent = selectedDetailsTask?.parentId === null || selectedDetailsTask?.parentId === undefined
+    ? null
+    : findTaskNode(allTasks, selectedDetailsTask.parentId);
+  const saveTaskDetails = async (patch: Parameters<ApplicationApi["updateTask"]>[1]): Promise<boolean> => {
+    if (selectedDetailsTask === null) return false;
+    setDetailSaveStatus("Saving…");
+    try {
+      const updatedTask = await api.updateTask(selectedDetailsTask.id, patch);
+      queryClient.setQueryData<ReadonlyArray<TaskNode>>(taskQueryKey, (current) => {
+        if (current === undefined) return current;
+        const updateNode = (node: TaskNode): TaskNode => node.id === updatedTask.id
+          ? Object.freeze({ ...node, ...updatedTask, children: node.children })
+          : Object.freeze({ ...node, children: node.children.map(updateNode) });
+        return current.map(updateNode);
+      });
+      setDetailSaveStatus("Saved");
+      return true;
+    } catch {
+      setDetailSaveStatus("Could not save changes");
+      return false;
+    }
+  };
   const inboxSections = allSections.filter((section) => section.projectId === null);
   const inboxRootTasks = allTasks.filter((task) => task.projectId === null && task.sectionId === null);
 
@@ -832,6 +966,12 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
       : targetProjectId !== null
         ? allProjects.find((project) => project.id === targetProjectId)?.title ?? "selected project"
         : "Inbox";
+  const pageMode = currentPath === "/dates" ? "dates" : currentPath === "/labels" ? "labels" : "tasks";
+  const selectedLabel = new URLSearchParams(window.location.search).get("label") ?? "";
+  const viewTasks = pageMode === "dates"
+    ? filterTaskTree(allTasks, (task) => Boolean(task.dueDate))
+    : filterTaskTree(allTasks, (task) => task.labels.length > 0 && (!selectedLabel || task.labels.includes(selectedLabel)));
+  const viewTitle = pageMode === "dates" ? "Dates" : pageMode === "labels" ? (selectedLabel ? `Label: ${selectedLabel}` : "Labels") : targetProjectId === null ? "Inbox" : taskTargetLabel;
   const markdown = currentMarkdown(taskTargetLabel, inboxRootTasks, inboxSections, allTasks, targetProjectId);
 
   const copyMarkdown = async () => {
@@ -865,10 +1005,13 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
           <span className="brand-mark">T</span>
           <strong>Todoist Clone</strong>
         </div>
+        <SearchPalette tasks={flatTasks} projects={allProjects} sections={allSections} onTaskSelect={(task) => { const node = findTaskNode(allTasks, task.id); if (node !== null) openDetails(node); }} />
+        <button type="button" className="nav-button add-task-nav-button" onClick={() => { setAddTaskProjectId(pageMode === "tasks" ? targetProjectId : null); setAddTaskTitle(""); setAddTaskDescription(""); setAddTaskDate(""); setAddTaskLabels(""); setAddTaskOpen(true); }}><Plus size={17} aria-hidden="true" />Add task <kbd>Q</kbd></button>
         <button
           type="button"
           className={["nav-button", targetProjectId === null && targetSectionId === null ? "active" : ""].filter(Boolean).join(" ")}
           onClick={() => {
+            if (pageMode !== "tasks") { window.history.pushState({}, "", "/"); setCurrentPath("/"); }
             setTargetProjectId(null);
             setTargetSectionId(null);
           }}
@@ -880,6 +1023,8 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
           <Inbox size={16} aria-hidden="true" />
           Inbox
         </button>
+        <a className={clsx("nav-button nav-link-button", pageMode === "dates" && "active")} href="/dates"><CalendarDays size={16} aria-hidden="true" />Dates</a>
+        <a className={clsx("nav-button nav-link-button", pageMode === "labels" && "active")} href="/labels"><Tag size={16} aria-hidden="true" />Labels</a>
         {toolsEnabled ? (
           <a className="nav-button nav-link-button" href="/tools">
             <Code2 size={16} aria-hidden="true" />
@@ -895,7 +1040,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
           <h2>My Projects</h2>
           {activeProjects.map((project) =>
             editProjectId === project.id ? (
-              <form key={project.id} className="project-edit-form" onSubmit={submitProjectEdit(project)}>
+              <form key={project.id} className="project-edit-form" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setEditProjectId(null); setEditProjectTitle(""); } }} onSubmit={submitProjectEdit(project)}>
                 <label htmlFor={`project-edit-${project.id}`}>Project title</label>
                 <input
                   id={`project-edit-${project.id}`}
@@ -923,6 +1068,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
                     activeDropZone === projectPlacement(project.id) && "drop-active"
                   )}
                   onClick={() => {
+                    if (pageMode !== "tasks") { window.history.pushState({}, "", `/?project=${encodeURIComponent(project.id)}`); setCurrentPath("/"); }
                     setTargetProjectId(project.id);
                     setTargetSectionId(null);
                   }}
@@ -953,7 +1099,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
             <button type="submit"><Plus size={16} aria-hidden="true" />Add project</button>
           </form>
         </div>
-        <button type="button" className="nav-button sidebar-export" onClick={exportZip}>
+        {pageMode === "tasks" ? <><button type="button" className="nav-button sidebar-export" onClick={exportZip}>
           <Archive size={16} aria-hidden="true" />
           Export all ZIP
         </button>
@@ -972,14 +1118,14 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
         >
           <Eye size={16} aria-hidden="true" />
           Preview all markdown
-        </button>
+        </button></> : null}
       </aside>
 
       <section className="workspace card shadow-sm" aria-label="Task manager">
         <header className="header">
           <p className="eyebrow">Self-hosted MVP</p>
-          <h1>{targetProjectId === null ? "Inbox" : taskTargetLabel}</h1>
-          <div className="export-actions" aria-label="Markdown export">
+          <h1>{viewTitle}</h1>
+          {pageMode === "tasks" ? <div className="export-actions" aria-label="Markdown export">
             <button type="button" onClick={copyMarkdown}>
               <ClipboardCopy size={16} aria-hidden="true" />
               Copy markdown
@@ -989,22 +1135,20 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
               Preview markdown
             </button>
             {copyStatus.length > 0 ? <span className="muted">{copyStatus}</span> : null}
-          </div>
+          </div> : null}
         </header>
 
-        <div className="card bg-light border p-3 task-create-block mb-3">
-          <form className="task-form m-0" onSubmit={submit}>
-            <label className="input-label" htmlFor="task-title">Task title for {taskTargetLabel}</label>
-            <div className="input-row">
-              <input id="task-title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Add a task" />
-              <button type="submit" disabled={createMutation.isPending}><Plus size={16} aria-hidden="true" />Add task</button>
-            </div>
-          </form>
-        </div>
+
 
         {tasks.isLoading ? <p className="muted">Loading tasks...</p> : null}
         {tasks.isError ? <p className="error">Unable to load tasks.</p> : null}
-        {targetProjectId === null ? (
+        {pageMode !== "tasks" ? (
+          <section className="drop-zone task-filter-page" aria-label={`${viewTitle} tasks`}>
+            {pageMode === "dates" ? <div className="date-view-switch" aria-label="Date view"><button type="button" aria-pressed={dateView === "list"} onClick={() => setDateView("list")}>List</button><button type="button" aria-pressed={dateView === "calendar"} onClick={() => setDateView("calendar")}>Calendar</button></div> : null}
+            {pageMode === "labels" ? <nav className="label-filter-list" aria-label="Filter by label"><a className={!selectedLabel ? "active" : ""} href="/labels">All labels</a>{Array.from(new Set(flatTasks.flatMap((task) => task.labels))).sort().map((label) => <a key={label} className={selectedLabel === label ? "active" : ""} href={`/labels?label=${encodeURIComponent(label)}`}>{label}</a>)}</nav> : null}
+            {pageMode === "dates" && dateView === "calendar" ? <><div className="calendar-month-control"><button type="button" aria-label="Previous month" onClick={() => setCalendarMonth((month) => { const date = new Date(`${month}-01T00:00:00Z`); date.setUTCMonth(date.getUTCMonth() - 1); return date.toISOString().slice(0, 7); })}>‹</button><label>Month<input aria-label="Calendar month" type="month" value={calendarMonth} onChange={(event) => setCalendarMonth(event.target.value)} /></label><button type="button" aria-label="Next month" onClick={() => setCalendarMonth((month) => { const date = new Date(`${month}-01T00:00:00Z`); date.setUTCMonth(date.getUTCMonth() + 1); return date.toISOString().slice(0, 7); })}>›</button></div><div className="dates-calendar" aria-label="Calendar view">{Array.from({ length: new Date(Number(calendarMonth.slice(0, 4)), Number(calendarMonth.slice(5, 7)), 0).getDate() }, (_, index) => index + 1).map((day) => { const matching = viewTasks.filter((task) => task.dueDate?.startsWith(calendarMonth) && Number(task.dueDate.slice(-2)) === day); return <section key={day} className="dates-calendar-day"><h2>{day}</h2>{matching.map((task) => <button type="button" key={task.id} onClick={() => { const node = findTaskNode(allTasks, task.id); if (node) openDetails(node); }}>{task.title}</button>)}</section>; })}</div></> : viewTasks.length > 0 ? renderTaskNodes(viewTasks, taskActions) : <p className="empty">{pageMode === "dates" ? "No dated tasks yet." : "No tasks with this label."}</p>}
+          </section>
+        ) : targetProjectId === null ? (
           <div className="board">
             <section
               className={clsx("drop-zone", activeDropZone === "inbox" && "drop-active")}
@@ -1039,7 +1183,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
                 >
                   <div className="section-header">
                     {editSectionId === section.id ? (
-                      <form className="section-edit-form" onSubmit={submitSectionEdit(section)}>
+                      <form className="section-edit-form" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setEditSectionId(null); setEditSectionTitle(""); } }} onSubmit={submitSectionEdit(section)}>
                         <label htmlFor={`section-edit-${section.id}`}>Section title</label>
                         <input
                           id={`section-edit-${section.id}`}
@@ -1130,21 +1274,20 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
           </FloatingFocusManager>
         </FloatingOverlay>
       ) : null}
+      {addTaskOpen ? <div className="task-details-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setAddTaskOpen(false); }}><section className="add-task-dialog" role="dialog" aria-modal="true" aria-label="Add task" onKeyDown={(event) => { if (event.key === "Escape") setAddTaskOpen(false); }}><header><h2>Add task</h2><button type="button" aria-label="Close add task" onClick={() => setAddTaskOpen(false)}><X size={18} /></button></header><form onSubmit={async (event) => { event.preventDefault(); const taskTitle = addTaskTitle.trim(); if (!taskTitle) return; const created = await api.createTask(taskTitle, addTaskProjectId, null, null); const patch: Parameters<ApplicationApi["updateTask"]>[1] = { description: addTaskDescription, dueDate: addTaskDate || null, labels: addTaskLabels.split(",").map((label) => label.trim()).filter(Boolean) }; if (patch.description || patch.dueDate || patch.labels?.length) await api.updateTask(created.id, patch); await queryClient.invalidateQueries({ queryKey: taskQueryKey }); setAddTaskOpen(false); }}><label>Task name<input autoFocus aria-label="New task title" value={addTaskTitle} onChange={(event) => setAddTaskTitle(event.target.value)} required /></label><label>Description<textarea aria-label="New task description" value={addTaskDescription} onChange={(event) => setAddTaskDescription(event.target.value)} rows={3} /></label><label>Project<select aria-label="Add task project" value={addTaskProjectId ?? "inbox"} onChange={(event) => setAddTaskProjectId(event.target.value === "inbox" ? null : event.target.value)}><option value="inbox">Inbox</option>{activeProjects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}</select></label><label>Date<input aria-label="New task date" type="date" value={addTaskDate} onChange={(event) => setAddTaskDate(event.target.value)} /></label><label>Labels<input aria-label="New task labels" value={addTaskLabels} onChange={(event) => setAddTaskLabels(event.target.value)} placeholder="Separate labels with commas" /></label><div><button type="button" onClick={() => setAddTaskOpen(false)}>Cancel</button><button type="submit" className="btn-primary">Add task</button></div></form></section></div> : null}
       {selectedDetailsTask !== null ? (
         <div className="task-details-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDetailsTaskId(null); }}>
-          <section className="task-details-modal" role="dialog" aria-modal="true" aria-label={`Task details: ${selectedDetailsTask.title}`} onKeyDown={(event) => { if (event.key === "Escape") setDetailsTaskId(null); }}>
-            <header><h2>Task details</h2><button type="button" aria-label="Close task details" onClick={() => setDetailsTaskId(null)}><X size={18} /></button></header>
-            <form onSubmit={async (event) => {
-              event.preventDefault();
-              await api.updateTask(selectedDetailsTask.id, { title: detailTitle.trim(), description: detailDescription, dueDate: detailDueDate || null, labels: detailLabels.split(",").map((label) => label.trim()).filter(Boolean) });
-              await queryClient.invalidateQueries({ queryKey: taskQueryKey });
-              setDetailsTaskId(null);
-            }}>
-              <label>Title<input autoFocus value={detailTitle} onChange={(event) => setDetailTitle(event.target.value)} required /></label>
-              <label>Description<textarea value={detailDescription} onChange={(event) => setDetailDescription(event.target.value)} rows={4} /></label>
-              <label>Date<input type="date" value={detailDueDate} onChange={(event) => setDetailDueDate(event.target.value)} /></label>
-              <label>Labels<input value={detailLabels} onChange={(event) => setDetailLabels(event.target.value)} placeholder="Comma separated labels" /></label>
-              <fieldset><legend>Subtasks</legend>
+          <section className="task-details-modal" role="dialog" aria-modal="true" aria-label={`Task details: ${selectedDetailsTask.title}`} onKeyDown={(event) => { if (event.key === "Escape" && editingDetailField === null && !datePickerOpen) setDetailsTaskId(null); }}>
+            <header className="task-details-header"><a href={selectedDetailsProject === null ? "/" : `/?project=${encodeURIComponent(selectedDetailsProject.id)}`}>{selectedDetailsProject?.title ?? "Inbox"}</a><div><button type="button" aria-label="Close task details" onClick={() => setDetailsTaskId(null)}><X size={18} /></button></div></header>
+            <div className="task-details-layout">
+              <div className="task-details-main">
+                <nav className="task-details-breadcrumbs" aria-label="Task location">{selectedDetailsParent !== null ? <><a href={`/?task=${encodeURIComponent(selectedDetailsParent.id)}`}>{selectedDetailsParent.title}</a><span aria-hidden="true">/</span></> : null}<span>{selectedDetailsTask.title}</span></nav>
+                <div className="task-detail-editable">
+                  {editingDetailField === "title" ? <div className="task-detail-editor"><input autoFocus aria-label="Edit task title" value={detailTitle} onChange={(event) => setDetailTitle(event.target.value)} onKeyDown={async (event) => { if (event.key === "Escape") { setDetailTitle(selectedDetailsTask.title); setEditingDetailField(null); } if (event.key === "Enter") { event.preventDefault(); const value = detailTitle.trim(); if (value && await saveTaskDetails({ title: value })) setEditingDetailField(null); } }} /><div><button type="button" onClick={() => { setDetailTitle(selectedDetailsTask.title); setEditingDetailField(null); }}>Cancel</button><button type="button" className="btn-primary" onClick={async () => { const value = detailTitle.trim(); if (value && await saveTaskDetails({ title: value })) setEditingDetailField(null); }}>Save</button></div></div> : <button type="button" className="task-detail-title-display" aria-label="Edit task title" onClick={() => { setDetailTitle(selectedDetailsTask.title); setEditingDetailField("title"); }}>{selectedDetailsTask.title}</button>}
+                  {editingDetailField === "description" ? <div className="task-detail-editor"><textarea autoFocus aria-label="Edit task description" value={detailDescription} onChange={(event) => setDetailDescription(event.target.value)} rows={4} onKeyDown={async (event) => { if (event.key === "Escape") { setDetailDescription(selectedDetailsTask.description); setEditingDetailField(null); } if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); if (await saveTaskDetails({ description: detailDescription })) setEditingDetailField(null); } }} /><div><button type="button" onClick={() => { setDetailDescription(selectedDetailsTask.description); setEditingDetailField(null); }}>Cancel</button><button type="button" className="btn-primary" onClick={async () => { if (await saveTaskDetails({ description: detailDescription })) setEditingDetailField(null); }}>Save</button></div></div> : <button type="button" className="task-detail-description-display" aria-label="Edit task description" onClick={() => { setDetailDescription(selectedDetailsTask.description); setEditingDetailField("description"); }}>{selectedDetailsTask.description || "Add description"}</button>}
+                </div>
+                <fieldset><legend>Subtasks</legend>
+
                 {selectedDetailsTask.children.map((child) => <div className="details-subtask-row" key={child.id}><button type="button" className="details-subtask" onClick={() => openDetails(child)}>{child.title}</button><button type="button" aria-label={`Delete subtask ${child.title}`} onClick={async () => { if (!confirmDeletion(`Delete subtask “${child.title}” and its descendants?`)) return; await api.deleteTask(child.id); await queryClient.invalidateQueries({ queryKey: taskQueryKey }); }}>Delete</button></div>)}
                 <div className="details-subtask-add"><input aria-label="New subtask title" value={detailSubtask} onChange={(event) => setDetailSubtask(event.target.value)} placeholder="Add subtask" /><button type="button" onClick={async () => { const title = detailSubtask.trim(); if (!title) return; await api.createTask(title, selectedDetailsTask.projectId, selectedDetailsTask.sectionId, selectedDetailsTask.id); setDetailSubtask(""); await queryClient.invalidateQueries({ queryKey: taskQueryKey }); }}>Add</button></div>
               </fieldset>
@@ -1155,8 +1298,15 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
                 <label>Add comment<textarea value={detailComment} onChange={(event) => setDetailComment(event.target.value)} rows={2} /></label>
                 <button type="button" disabled={!detailComment.trim()} onClick={async () => { const comments = [...selectedDetailsTask.comments, { id: crypto.randomUUID(), body: detailComment.trim(), createdAt: new Date().toISOString() }]; await api.updateTask(selectedDetailsTask.id, { comments }); setDetailComment(""); await queryClient.invalidateQueries({ queryKey: taskQueryKey }); }}>Add comment</button>
               </section>
-              <footer><button type="button" onClick={() => setDetailsTaskId(null)}>Cancel</button><button type="submit">Save task</button></footer>
-            </form>
+              </div>
+              <aside className="task-details-sidebar">
+                <section><h3>Project</h3>{editingProject ? <><select className="form-select" aria-label="Project or Inbox" value={detailProjectId === null ? "inbox" : `project:${detailProjectId}`} onChange={(event) => setDetailProjectId(event.target.value === "inbox" ? null : event.target.value.slice("project:".length))}><option value="inbox">Inbox</option>{activeProjects.map((project) => <option key={project.id} value={`project:${project.id}`}>{project.title}</option>)}</select><div><button type="button" onClick={() => { setDetailProjectId(selectedDetailsTask.projectId); setEditingProject(false); }}>Cancel</button><button type="button" className="btn-primary" onClick={async () => { try { await api.moveTask(selectedDetailsTask.id, detailProjectId, null, null, null, null); await queryClient.invalidateQueries({ queryKey: taskQueryKey }); setEditingProject(false); setDetailSaveStatus("Saved"); } catch { setDetailSaveStatus("Could not save changes"); } }}>Save</button></div></> : <div className="task-detail-meta-value"><a href={selectedDetailsProject === null ? "/" : `/?project=${encodeURIComponent(selectedDetailsProject.id)}`}>{selectedDetailsProject?.title ?? "Inbox"}</a><button type="button" onClick={() => setEditingProject(true)}>Change</button></div>}</section>
+                <section><h3>Date</h3>{detailDueDate ? <div className="task-detail-meta-value"><button type="button" className="task-detail-date" onClick={() => setDatePickerOpen(true)} title={detailDueDate}>{new Date(`${detailDueDate}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</button><button type="button" aria-label="Remove date" onClick={async () => { setDetailDueDate(""); await saveTaskDetails({ dueDate: null }); }}>×</button></div> : <button type="button" onClick={() => setDatePickerOpen(true)}>＋ Add date</button>}</section>
+                <section><div className="task-detail-label-heading"><h3>Labels</h3><button type="button" aria-label="Add label" onClick={() => setDetailLabelInput(" ")}>＋</button></div><div className="detail-label-chips">{selectedDetailsTask.labels.map((label) => <span className="task-detail-label" key={label}>{label}<button type="button" aria-label={`Remove label ${label}`} onClick={() => { const labels = selectedDetailsTask.labels.filter((item) => item !== label); setDetailLabels(labels.join(", ")); void saveTaskDetails({ labels }); }}>×</button></span>)}</div>{detailLabelInput !== "" ? <><input autoFocus aria-label="Labels" list="task-label-options" value={detailLabelInput.trimStart()} placeholder="Add a label" onChange={(event) => setDetailLabelInput(event.target.value)} onKeyDown={async (event) => { if (event.key === "Escape") setDetailLabelInput(""); if (event.key === "Enter") { event.preventDefault(); const label = detailLabelInput.trim(); if (!label) return; const labels = Array.from(new Set([...selectedDetailsTask.labels, label])); if (await saveTaskDetails({ labels })) setDetailLabelInput(""); } }} /><datalist id="task-label-options">{Array.from(new Set(flatTasks.flatMap((task) => task.labels))).map((label) => <option key={label} value={label} />)}</datalist></> : null}</section>
+                <p className="task-autosave-status" aria-live="polite">{detailSaveStatus}</p>
+              </aside>
+            </div>
+            {datePickerOpen ? <div className="task-date-picker-backdrop"><section className="task-date-picker" role="dialog" aria-modal="true" aria-label="Change date" onKeyDown={async (event) => { if (event.key === "Escape") { setDetailDueDate(selectedDetailsTask.dueDate ?? ""); setDatePickerOpen(false); } if (event.key === "Enter") { event.preventDefault(); if (await saveTaskDetails({ dueDate: detailDueDate || null })) setDatePickerOpen(false); } }}><h3>{selectedDetailsTask.dueDate ? "Change date" : "Add date"}</h3><input autoFocus type="date" aria-label="New date" value={detailDueDate} onChange={(event) => setDetailDueDate(event.target.value)} /><div><button type="button" onClick={() => { setDetailDueDate(selectedDetailsTask.dueDate ?? ""); setDatePickerOpen(false); }}>Cancel</button><button type="button" className="btn-primary" onClick={async () => { if (await saveTaskDetails({ dueDate: detailDueDate || null })) setDatePickerOpen(false); }}>Save date</button></div></section></div> : null}
           </section>
         </div>
       ) : null}
@@ -1165,12 +1315,18 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   );
 };
 
-export const ToolsPage = ({ api }: Readonly<{ api: ToolsApi }>) => {
+export const ToolsPage = ({ api, navigationApi }: Readonly<{ api: ToolsApi; navigationApi?: ApplicationApi }>) => {
   const [selectedTable, setSelectedTable] = useState("");
+  useEffect(() => { const openQuickAdd = (event: globalThis.KeyboardEvent) => { const target = event.target; const typing = target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)); if (!typing && !event.ctrlKey && !event.metaKey && !event.altKey && ["q", "й"].includes(event.key.toLocaleLowerCase())) window.location.href = "/?addTask=1"; }; window.addEventListener("keydown", openQuickAdd); return () => window.removeEventListener("keydown", openQuickAdd); }, []);
+  const [projectTitle, setProjectTitle] = useState("");
+  const [markdownPreview, setMarkdownPreview] = useState(false);
   const [sql, setSql] = useState("SELECT * FROM tasks ORDER BY lexical_order;");
   const [result, setResult] = useState<unknown>(Object.freeze({ ready: true }));
   const [recordsLimit, setRecordsLimit] = useState<"10" | "100" | "all">("10");
   const queryClient = useQueryClient();
+  const projects = useQuery({ queryKey: projectQueryKey, queryFn: navigationApi?.listProjects ?? (async () => Object.freeze([])) });
+  const taskTree = useQuery({ queryKey: taskQueryKey, queryFn: navigationApi?.listTasks ?? (async () => Object.freeze([])) });
+  const navigationSections = useQuery({ queryKey: sectionQueryKey, queryFn: navigationApi?.listSections ?? (async () => Object.freeze([])) });
 
   const tables = useQuery({
     queryKey: tablesQueryKey,
@@ -1229,10 +1385,14 @@ export const ToolsPage = ({ api }: Readonly<{ api: ToolsApi }>) => {
           <span className="brand-mark">T</span>
           <strong>Todoist Clone</strong>
         </div>
+        <SearchPalette tasks={flattenTaskNodes(taskTree.data ?? Object.freeze([]))} projects={projects.data ?? Object.freeze([])} sections={navigationSections.data ?? Object.freeze([])} onTaskSelect={(task) => { window.location.href = `/?task=${encodeURIComponent(task.id)}`; }} />
+        <a className="nav-button add-task-nav-button" href="/?addTask=1"><Plus size={17} aria-hidden="true" />Add task <kbd>Q</kbd></a>
         <a className="nav-button nav-link-button" href="/">
           <Inbox size={16} aria-hidden="true" />
           Inbox
         </a>
+        <a className="nav-button nav-link-button" href="/dates"><CalendarDays size={16} aria-hidden="true" />Dates</a>
+        <a className="nav-button nav-link-button" href="/labels"><Tag size={16} aria-hidden="true" />Labels</a>
         <a className="nav-button nav-link-button active" href="/tools">
           <Code2 size={16} aria-hidden="true" />
           Tools
@@ -1241,6 +1401,10 @@ export const ToolsPage = ({ api }: Readonly<{ api: ToolsApi }>) => {
           <Settings size={16} aria-hidden="true" />
           Settings
         </a>
+        <a className="nav-button nav-link-button" href="/archived-projects"><Archive size={16} aria-hidden="true" /> Archived projects</a>
+        <div className="sidebar-group"><h2>My Projects</h2>{(projects.data ?? []).filter((project) => !project.archived).map((project) => <a className="nav-button nav-link-button project-tool-link" key={project.id} title={project.title} href={`/?project=${encodeURIComponent(project.id)}`}># <span>{project.title}</span></a>)}</div>
+        {navigationApi ? <div className="card bg-light border p-3 sidebar-create-block"><form className="compact-form m-0" onSubmit={async (event) => { event.preventDefault(); const nextTitle = projectTitle.trim(); if (!nextTitle) return; await navigationApi.createProject(nextTitle); setProjectTitle(""); await queryClient.invalidateQueries({ queryKey: projectQueryKey }); }}><label htmlFor="tools-project-title">Project title</label><input id="tools-project-title" value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} /><button type="submit"><Plus size={16} aria-hidden="true" />Add project</button></form></div> : null}
+        {navigationApi ? <><button type="button" className="nav-button sidebar-export" onClick={async () => downloadBlob(await createZipBlob(allMarkdownFiles(projects.data ?? [], navigationSections.data ?? [], taskTree.data ?? [])), "todoist-clone-markdown.zip")}><Archive size={16} aria-hidden="true" />Export all ZIP</button><button type="button" className="nav-button sidebar-export" onClick={() => downloadBlob(new Blob([allMarkdownFiles(projects.data ?? [], navigationSections.data ?? [], taskTree.data ?? []).map((file) => file.content).join("\n\n---\n\n")], { type: "text/markdown;charset=utf-8" }), "todoist-clone.md")}><Download size={16} aria-hidden="true" />Export all markdown</button><button type="button" className="nav-button sidebar-export" onClick={async () => { await copyText(allMarkdownFiles(projects.data ?? [], navigationSections.data ?? [], taskTree.data ?? []).map((file) => file.content).join("\n\n---\n\n")); setResult("All markdown copied"); }}><ClipboardCopy size={16} aria-hidden="true" />Copy all markdown</button><button type="button" className="nav-button sidebar-export" onClick={() => setMarkdownPreview(true)}><Eye size={16} aria-hidden="true" />Preview all markdown</button></> : null}
       </aside>
       <section className="workspace card shadow-sm tools-panel" aria-label="Database tools">
         <header className="header">
@@ -1293,18 +1457,33 @@ export const ToolsPage = ({ api }: Readonly<{ api: ToolsApi }>) => {
 
         <section className="card tools-result-card"><header><h2>Result</h2><span>{runQuery.isPending || viewRecords.isPending ? "Loading" : "Ready"}</span></header><pre className="query-result">{JSON.stringify(result, null, 2)}</pre></section>
       </section>
+      {markdownPreview ? <div className="markdown-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setMarkdownPreview(false); }}><section className="markdown-modal" role="dialog" aria-modal="true" aria-label="Markdown preview"><header className="markdown-modal-header"><h2>All tasks markdown</h2><button type="button" className="btn btn-outline-secondary" onClick={() => setMarkdownPreview(false)}><X size={16} aria-hidden="true" />Close</button></header><pre>{allMarkdownFiles(projects.data ?? [], navigationSections.data ?? [], taskTree.data ?? []).map((file) => file.content).join("\n\n---\n\n")}</pre></section></div> : null}
     </main>
   );
 };
 
 export const SettingsPage = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const queryClient = useQueryClient();
+  const [navigationProjectTitle, setNavigationProjectTitle] = useState("");
+  const [settingsPreviewOpen, setSettingsPreviewOpen] = useState(false);
   const settings = useQuery({ queryKey: settingsQueryKey, queryFn: api.getSettings });
   const authStatus = useQuery({ queryKey: authStatusQueryKey, queryFn: api.getAuthStatus });
   const [confirmDelete, setConfirmDelete] = useState(true);
   const [accessMode, setAccessMode] = useState<AppSettings["accessMode"]>("anonymous");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  useEffect(() => {
+    const openQuickAdd = (event: globalThis.KeyboardEvent) => {
+      const target = event.target;
+      const typing = target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+      if (!typing && !event.ctrlKey && !event.metaKey && !event.altKey && ["q", "й"].includes(event.key.toLocaleLowerCase())) window.location.href = "/?addTask=1";
+    };
+    window.addEventListener("keydown", openQuickAdd);
+    return () => window.removeEventListener("keydown", openQuickAdd);
+  }, []);
+  const projects = useQuery({ queryKey: projectQueryKey, queryFn: api.listProjects });
+  const sections = useQuery({ queryKey: sectionQueryKey, queryFn: api.listSections });
+  const tasks = useQuery({ queryKey: taskQueryKey, queryFn: api.listTasks });
 
   useEffect(() => {
     if (settings.data !== undefined) {
@@ -1335,20 +1514,17 @@ export const SettingsPage = ({ api }: Readonly<{ api: ApplicationApi }>) => {
           <span className="brand-mark">T</span>
           <strong>Todoist Clone</strong>
         </div>
-        <a className="nav-button nav-link-button" href="/">
-          <Inbox size={16} aria-hidden="true" />
-          Inbox
-        </a>
-        {toolsEnabled ? (
-          <a className="nav-button nav-link-button" href="/tools">
-            <Code2 size={16} aria-hidden="true" />
-            Tools
-          </a>
-        ) : null}
-        <a className="nav-button nav-link-button active" href="/settings">
-          <Settings size={16} aria-hidden="true" />
-          Settings
-        </a>
+        <SearchPalette tasks={flattenTaskNodes(tasks.data ?? Object.freeze([]))} projects={projects.data ?? Object.freeze([])} sections={sections.data ?? Object.freeze([])} onTaskSelect={(task) => { window.location.href = `/?task=${encodeURIComponent(task.id)}`; }} />
+        <a className="nav-button add-task-nav-button" href="/?addTask=1"><Plus size={17} aria-hidden="true" />Add task <kbd>Q</kbd></a>
+        <a className="nav-button nav-link-button" href="/"><Inbox size={16} aria-hidden="true" />Inbox</a>
+        <a className="nav-button nav-link-button" href="/dates"><CalendarDays size={16} aria-hidden="true" />Dates</a>
+        <a className="nav-button nav-link-button" href="/labels"><Tag size={16} aria-hidden="true" />Labels</a>
+        {toolsEnabled ? <a className="nav-button nav-link-button" href="/tools"><Code2 size={16} aria-hidden="true" />Tools</a> : null}
+        <a className="nav-button nav-link-button active" href="/settings"><Settings size={16} aria-hidden="true" />Settings</a>
+        <a className="nav-button nav-link-button" href="/archived-projects"><Archive size={16} aria-hidden="true" />Archived projects</a>
+        <div className="sidebar-group"><h2>My Projects</h2>{(projects.data ?? []).filter((project) => !project.archived).map((project) => <a className="nav-button nav-link-button project-tool-link" key={project.id} href={`/?project=${encodeURIComponent(project.id)}`}># <span>{project.title}</span></a>)}</div>
+        <div className="card bg-light border p-3 sidebar-create-block"><form className="compact-form m-0" onSubmit={async (event) => { event.preventDefault(); const value = navigationProjectTitle.trim(); if (!value) return; await api.createProject(value); setNavigationProjectTitle(""); await queryClient.invalidateQueries({ queryKey: projectQueryKey }); }}><label htmlFor="settings-project-title">Project title</label><input id="settings-project-title" value={navigationProjectTitle} onChange={(event) => setNavigationProjectTitle(event.target.value)} /><button type="submit"><Plus size={16} aria-hidden="true" />Add project</button></form></div>
+        <div className="sidebar-settings-exports"><button type="button" onClick={async () => downloadBlob(await createZipBlob(allMarkdownFiles(projects.data ?? [], sections.data ?? [], tasks.data ?? [])), "todoist-clone-markdown.zip")}><Archive size={16} aria-hidden="true" />Export all ZIP</button><button type="button" onClick={() => downloadBlob(new Blob([allMarkdownFiles(projects.data ?? [], sections.data ?? [], tasks.data ?? []).map((file) => file.content).join("\n\n---\n\n")], { type: "text/markdown;charset=utf-8" }), "todoist-clone.md")}><Download size={16} aria-hidden="true" />Export all markdown</button><button type="button" onClick={async () => { await copyText(allMarkdownFiles(projects.data ?? [], sections.data ?? [], tasks.data ?? []).map((file) => file.content).join("\n\n---\n\n")); }}><ClipboardCopy size={16} aria-hidden="true" />Copy all markdown</button><button type="button" onClick={() => setSettingsPreviewOpen(true)}><Eye size={16} aria-hidden="true" />Preview all markdown</button></div>
       </aside>
       <section className="workspace card shadow-sm settings-panel" aria-label="Settings">
         <header className="header">
@@ -1436,6 +1612,7 @@ export const SettingsPage = ({ api }: Readonly<{ api: ApplicationApi }>) => {
           </form>
         ) : null}
       </section>
+      {settingsPreviewOpen ? <div className="markdown-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSettingsPreviewOpen(false); }}><section className="markdown-modal" role="dialog" aria-modal="true" aria-label="Markdown preview" onKeyDown={(event) => { if (event.key === "Escape") setSettingsPreviewOpen(false); }}><header className="markdown-modal-header"><h2>All tasks markdown</h2><button type="button" onClick={() => setSettingsPreviewOpen(false)}><X size={16} aria-hidden="true" />Close</button></header><pre>{allMarkdownFiles(projects.data ?? [], sections.data ?? [], tasks.data ?? []).map((file) => file.content).join("\n\n---\n\n")}</pre></section></div> : null}
     </main>
   );
 };
@@ -1526,7 +1703,7 @@ const AppRouter = () => {
   if (path.startsWith("/archived-projects")) return <ArchivedProjectsPage api={api} />;
 
   if (path.startsWith("/tools")) {
-    return <ToolsPage api={createToolsApi()} />;
+    return <ToolsPage api={createToolsApi()} navigationApi={api} />;
   }
 
   return <TaskApp api={api} />;

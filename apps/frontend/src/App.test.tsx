@@ -1,6 +1,6 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import type { Project, Section, Task, TaskNode } from "@todoist-clone/domain";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createQueryClient, SettingsPage, TaskApp, ToolsPage } from "./App";
@@ -161,19 +161,53 @@ describe("TaskApp", () => {
     expect(await screen.findByText("Plan MVP")).toBeInTheDocument();
   });
 
-  it("opens task details and saves description, date, labels, and comments", async () => {
+  it("edits text on demand with Save, Cancel, Enter and Escape, and edits dates and labels", async () => {
     const updateTask = vi.fn(async (id: string, patch: Parameters<ApplicationApi["updateTask"]>[1]): Promise<Task> => task({ id, title: patch.title ?? "Plan MVP", description: patch.description ?? "", dueDate: patch.dueDate ?? null, labels: patch.labels ?? [], comments: patch.comments ?? [] }));
     renderApp(Object.freeze({ ...baseApi(Object.freeze([task({ id: "task-1", title: "Plan MVP" })])), updateTask }));
     await userEvent.click(await screen.findByRole("button", { name: "Plan MVP" }));
-    await userEvent.clear(screen.getByLabelText("Description"));
-    await userEvent.type(screen.getByLabelText("Description"), "Ship the release");
-    await userEvent.type(screen.getByLabelText("Date"), "2026-11-01");
-    await userEvent.type(screen.getByLabelText("Labels"), "work, launch");
-    await userEvent.type(screen.getByLabelText("Add comment"), "Looks good");
-    await userEvent.click(screen.getByRole("button", { name: "Add comment" }));
+    const dialog = screen.getByRole("dialog", { name: "Task details: Plan MVP" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Edit task title" }));
+    await userEvent.clear(within(dialog).getByRole("textbox", { name: "Edit task title" }));
+    await userEvent.type(within(dialog).getByRole("textbox", { name: "Edit task title" }), "Plan launch{Enter}");
+    await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", { title: "Plan launch" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Edit task description" }));
+    await userEvent.type(within(dialog).getByRole("textbox", { name: "Edit task description" }), "Ship release{Enter}");
+    await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", { description: "Ship release" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Edit task description" }));
+    await userEvent.clear(within(dialog).getByRole("textbox", { name: "Edit task description" }));
+    await userEvent.type(within(dialog).getByRole("textbox", { name: "Edit task description" }), "discard{Escape}");
+    expect(within(dialog).getByRole("button", { name: "Edit task description" })).toHaveTextContent("Ship release");
+    await userEvent.click(within(dialog).getByRole("button", { name: /Add date/ }));
+    await userEvent.type(within(dialog).getByLabelText("New date"), "2026-11-01");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save date" }));
+    await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", { dueDate: "2026-11-01" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Add label" }));
+    await userEvent.type(within(dialog).getByLabelText("Labels"), "work{Enter}");
+    await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", { labels: ["work"] }));
+    await userEvent.type(within(dialog).getByLabelText("Add comment"), "Looks good");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Add comment" }));
     await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", expect.objectContaining({ comments: [expect.objectContaining({ body: "Looks good" })] })));
-    await userEvent.click(screen.getByRole("button", { name: "Save task" }));
-    await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", { title: "Plan MVP", description: "Ship the release", dueDate: "2026-11-01", labels: ["work", "launch"] }));
+    expect(within(dialog).queryByRole("button", { name: "Save task" })).not.toBeInTheDocument();
+  });
+
+  it("shows task location and parent links, and moves tasks between Inbox and projects", async () => {
+    const moveTask = vi.fn(async (id: string, projectId: string | null): Promise<Task> => task({ id, title: "Child task", projectId }));
+    const parent = task({ id: "parent-1", title: "Parent task", children: Object.freeze([task({ id: "child-1", title: "Child task", parentId: "parent-1" })]) });
+    renderApp(Object.freeze({
+      ...baseApi(Object.freeze([parent])),
+      listProjects: async () => Object.freeze([project({ id: "project-1", title: "Roadmap" })]),
+      moveTask
+    }));
+
+    await userEvent.click(await screen.findByRole("button", { name: "Child task" }));
+    const dialog = screen.getByRole("dialog", { name: "Task details: Child task" });
+    expect(within(dialog).getAllByRole("link", { name: "Inbox" })[0]).toHaveAttribute("href", "/");
+    expect(within(dialog).getByRole("link", { name: "Parent task" })).toHaveAttribute("href", "/?task=parent-1");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Change" }));
+    await userEvent.selectOptions(within(dialog).getByLabelText("Project or Inbox"), "project:project-1");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(moveTask).toHaveBeenCalledWith("child-1", "project-1", null, null, null, null));
+    expect(within(dialog).getAllByRole("link", { name: "Roadmap" }).length).toBeGreaterThan(0);
   });
 
   it("calls the create handler when a task is submitted", async () => {
@@ -186,8 +220,9 @@ describe("TaskApp", () => {
       })
     );
 
-    await userEvent.type(screen.getByLabelText(/Task title/), "Write tests");
-    await userEvent.click(screen.getByRole("button", { name: "Add task" }));
+    await userEvent.click(screen.getByRole("button", { name: /Add task/ }));
+    await userEvent.type(screen.getByLabelText("New task title"), "Write tests");
+    await userEvent.click(within(screen.getByRole("dialog", { name: "Add task" })).getByRole("button", { name: "Add task" }));
 
     await waitFor(() => expect(createTask).toHaveBeenCalledWith("Write tests", null, null, null));
   });
@@ -216,8 +251,9 @@ describe("TaskApp", () => {
     await userEvent.type(screen.getByLabelText("Project title"), "Roadmap");
     await userEvent.click(screen.getByRole("button", { name: "Add project" }));
     await userEvent.click(await screen.findByRole("button", { name: "Roadmap" }));
-    await userEvent.type(screen.getByLabelText(/Task title/), "Define milestones");
-    await userEvent.click(screen.getByRole("button", { name: "Add task" }));
+    await userEvent.click(screen.getByRole("button", { name: /Add task/ }));
+    await userEvent.type(screen.getByLabelText("New task title"), "Define milestones");
+    await userEvent.click(within(screen.getByRole("dialog", { name: "Add task" })).getByRole("button", { name: "Add task" }));
 
     await waitFor(() => expect(createTask).toHaveBeenCalledWith("Define milestones", "project-1", null, null));
   });
@@ -676,6 +712,53 @@ describe("ToolsPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Run query" }));
 
     await waitFor(() => expect(runQuery).toHaveBeenCalledWith("SELECT 1;"));
+  });
+});
+
+describe("Dates and Labels task views", () => {
+  afterEach(() => window.history.replaceState({}, "", "/"));
+
+  it("shows dated tasks and their labels with links into the label filter", async () => {
+    window.history.replaceState({}, "", "/dates");
+    renderApp(baseApi(Object.freeze([
+      task({ id: "dated", title: "Dated note", dueDate: "2026-10-23", labels: Object.freeze(["work"]) }),
+      task({ id: "plain", title: "No date" })
+    ])));
+
+    expect(await screen.findByRole("button", { name: "Dated note" })).toBeInTheDocument();
+    expect(screen.queryByText("No date")).not.toBeInTheDocument();
+    expect(screen.getByText("2026-10-23")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "work" })).toHaveAttribute("href", "/labels?label=work");
+  });
+
+  it("filters tasks by selected label across the complete task list", async () => {
+    window.history.replaceState({}, "", "/labels?label=work");
+    renderApp(baseApi(Object.freeze([
+      task({ id: "match", title: "Project task", projectId: "p1", labels: Object.freeze(["work"]) }),
+      task({ id: "other", title: "Other label", labels: Object.freeze(["home"]) })
+    ])));
+
+    expect(await screen.findByRole("button", { name: "Project task" })).toBeInTheDocument();
+    expect(screen.queryByText("Other label")).not.toBeInTheDocument();
+  });
+});
+
+describe("SearchPalette", () => {
+  it("searches task descriptions and labels, and opens matching destinations", async () => {
+    renderApp(baseApi(Object.freeze([
+      task({ id: "search-task", title: "Prepare launch", description: "needle phrase in notes", labels: Object.freeze(["work"]) })
+    ])));
+
+    await userEvent.click(await screen.findByRole("button", { name: /Search/ }));
+    const search = screen.getByRole("textbox", { name: "Search or type a command" });
+    await userEvent.type(search, "needle");
+    await userEvent.click(await screen.findByRole("button", { name: "Prepare launch" }));
+    expect(await screen.findByRole("dialog", { name: "Task details: Prepare launch" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Close task details" }));
+
+    fireEvent.keyDown(document.body, { key: "k", ctrlKey: true, bubbles: true });
+    await userEvent.type(screen.getByRole("textbox", { name: "Search or type a command" }), "work");
+    expect(await screen.findByRole("link", { name: /^work$/ })).toHaveAttribute("href", "/labels?label=work");
   });
 });
 
