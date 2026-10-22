@@ -221,7 +221,7 @@ describe("TaskApp", () => {
       })
     );
 
-    await userEvent.click(screen.getByRole("button", { name: /Add task/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Add task Q" }));
     await userEvent.type(screen.getByLabelText("New task title"), "Write tests");
     await userEvent.click(within(screen.getByRole("dialog", { name: "Add task" })).getByRole("button", { name: "Add task" }));
 
@@ -253,7 +253,7 @@ describe("TaskApp", () => {
     await userEvent.type(screen.getByLabelText("Project title"), "Roadmap");
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     await userEvent.click(await screen.findByRole("button", { name: "Roadmap" }));
-    await userEvent.click(screen.getByRole("button", { name: /Add task/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Add task Q" }));
     await userEvent.type(screen.getByLabelText("New task title"), "Define milestones");
     await userEvent.click(within(screen.getByRole("dialog", { name: "Add task" })).getByRole("button", { name: "Add task" }));
 

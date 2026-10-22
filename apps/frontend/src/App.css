@@ -1077,6 +1077,13 @@ body {
   line-height: 1.25;
 }
 
+.delete-all-tasks-button { display: inline-flex; align-items: center; gap: 6px; }
+.task-scope-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.task-scope-heading h2 { margin: 0; color: #333; font-size: 16px; font-weight: 650; }
+.scope-add-task-button { display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 6px; padding: 6px 8px; color: #c83a2d; background: transparent; font: inherit; cursor: pointer; }
+.scope-add-task-button:hover { background: #fff0e8; }
+.board > .drop-zone[aria-label="Inbox tasks"] .task-scope-heading h2 { display: none; }
+
 .export-actions {
   margin: -7px 0 14px;
   gap: 5px;

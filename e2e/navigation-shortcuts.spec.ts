@@ -17,7 +17,7 @@ test("task dialog, inline keyboard editing, navigation, search, and calendar wor
   await expect(page.getByRole("button", { name: project, exact: true })).toBeVisible();
 
   const taskName = unique("Keyboard task");
-  await page.getByRole("button", { name: /Add task/ }).click();
+  await page.getByRole("button", { name: "Add task Q" }).click();
   const addDialog = page.getByRole("dialog", { name: "Add task" });
   await addDialog.getByLabel("New task title").fill(taskName);
   await addDialog.getByLabel("New task description").fill("Details from the quick add dialog");

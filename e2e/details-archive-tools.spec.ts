@@ -12,7 +12,7 @@ test("edits task details and copies all Markdown", async ({ context, page }) => 
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("button", { name: projectTitle, exact: true })).toBeVisible();
   const title = unique("Detailed task");
-  await page.getByRole("button", { name: /Add task/ }).click();
+  await page.getByRole("button", { name: "Add task Q" }).click();
   const newTitle = page.getByLabel("New task title");
   await expect(newTitle).toHaveJSProperty("tagName", "TEXTAREA");
   await newTitle.fill(title);
@@ -130,6 +130,9 @@ test("edits task details and copies all Markdown", async ({ context, page }) => 
 
   await page.getByRole("button", { name: "Copy all markdown" }).click();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain(title);
+  const copiedMarkdown = await page.evaluate(() => navigator.clipboard.readText());
+  expect(copiedMarkdown).toContain(title);
+  expect(copiedMarkdown.match(/^# /gm)).toHaveLength(1);
 });
 
 test("renaming projects and sections preserves their visual order after reload", async ({ page }) => {
@@ -204,7 +207,7 @@ test("archives and restores projects, and views table records", async ({ page })
   await expect(page.getByRole("button", { name: title, exact: true })).toBeVisible();
   await page.getByRole("button", { name: title, exact: true }).click();
   const taskTitle = unique("Archived task");
-  await page.getByRole("button", { name: /Add task/ }).click();
+  await page.getByRole("button", { name: "Add task Q" }).click();
   await page.getByLabel("New task title").fill(taskTitle);
   await page.getByLabel("Add task project").selectOption({ label: title });
   await page.getByRole("button", { name: "Add task", exact: true }).click();

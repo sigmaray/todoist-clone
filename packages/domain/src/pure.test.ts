@@ -144,4 +144,13 @@ describe("renderTaskMarkdownDocument", () => {
       ].join("\n")
     );
   });
+
+  it("renders sections under one document title", () => {
+    const root = buildTaskTree([task({ id: "root", title: "Root task", lexicalOrder: "a" })]);
+    const section = buildTaskTree([task({ id: "section-task", title: "Section task", lexicalOrder: "a" })]);
+
+    const markdown = renderTaskMarkdownDocument("Project", root, [{ title: "Planning", tasks: section }]);
+    expect(markdown).toBe(["# Project", "", "- [ ] Root task (P4)", "", "## Planning", "", "- [ ] Section task (P4)", ""].join("\n"));
+    expect(markdown.match(/^# /gm)).toHaveLength(1);
+  });
 });

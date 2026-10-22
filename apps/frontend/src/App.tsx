@@ -383,24 +383,24 @@ const currentMarkdown = (
   targetProjectId: ProjectId | null
 ) => {
   if (targetProjectId !== null) {
-    return [
-      renderTaskMarkdownDocument(title, allTasks.filter((task) => task.projectId === targetProjectId && task.sectionId === null)),
-      ...sections.filter((section) => section.projectId === targetProjectId).map((section) => renderTaskMarkdownDocument(
-        `${title} / ${section.title}`,
-        allTasks.filter((task) => task.projectId === targetProjectId && task.sectionId === section.id)
-      ))
-    ].join("\n");
+    return renderTaskMarkdownDocument(
+      title,
+      allTasks.filter((task) => task.projectId === targetProjectId && task.sectionId === null),
+      sections.filter((section) => section.projectId === targetProjectId).map((section) => Object.freeze({
+        title: section.title,
+        tasks: allTasks.filter((task) => task.projectId === targetProjectId && task.sectionId === section.id)
+      }))
+    );
   }
 
-  return [
-    renderTaskMarkdownDocument("Inbox", inboxRootTasks),
-    ...sections.filter((section) => section.projectId === null).map((section) =>
-      renderTaskMarkdownDocument(
-        `Inbox / ${section.title}`,
-        allTasks.filter((task) => task.projectId === null && task.sectionId === section.id)
-      )
-    )
-  ].join("\n");
+  return renderTaskMarkdownDocument(
+    "Inbox",
+    inboxRootTasks,
+    sections.filter((section) => section.projectId === null).map((section) => Object.freeze({
+      title: section.title,
+      tasks: allTasks.filter((task) => task.projectId === null && task.sectionId === section.id)
+    }))
+  );
 };
 
 const allMarkdownFiles = (
@@ -413,30 +413,46 @@ const allMarkdownFiles = (
       name: "inbox.md",
       content: renderTaskMarkdownDocument(
         "Inbox",
-        tasks.filter((task) => task.projectId === null && task.sectionId === null)
+        tasks.filter((task) => task.projectId === null && task.sectionId === null),
+        sections.filter((section) => section.projectId === null).map((section) => Object.freeze({
+          title: section.title,
+          tasks: tasks.filter((task) => task.projectId === null && task.sectionId === section.id)
+        }))
       )
     }),
-    ...sections
-      .filter((section) => section.projectId === null)
-      .map((section) =>
-        Object.freeze({
-          name: `inbox-${slug(section.title)}.md`,
-          content: renderTaskMarkdownDocument(
-            `Inbox / ${section.title}`,
-            tasks.filter((task) => task.projectId === null && task.sectionId === section.id)
-          )
-        })
-      ),
     ...projects.map((project) =>
       Object.freeze({
         name: `project-${slug(project.title)}.md`,
         content: renderTaskMarkdownDocument(
           project.title,
-          tasks.filter((task) => task.projectId === project.id && task.sectionId === null)
+          tasks.filter((task) => task.projectId === project.id && task.sectionId === null),
+          sections.filter((section) => section.projectId === project.id).map((section) => Object.freeze({
+            title: section.title,
+            tasks: tasks.filter((task) => task.projectId === project.id && task.sectionId === section.id)
+          }))
         )
       })
     )
   ]);
+
+const allMarkdownDocument = (
+  projects: ReadonlyArray<Project>,
+  sections: ReadonlyArray<Section>,
+  tasks: ReadonlyArray<TaskNode>
+) => renderTaskMarkdownDocument("All tasks", [], [
+  Object.freeze({ title: "Inbox", tasks: tasks.filter((task) => task.projectId === null && task.sectionId === null) }),
+  ...sections.filter((section) => section.projectId === null).map((section) => Object.freeze({
+    title: `Inbox / ${section.title}`,
+    tasks: tasks.filter((task) => task.projectId === null && task.sectionId === section.id)
+  })),
+  ...projects.flatMap((project) => [
+    Object.freeze({ title: project.title, tasks: tasks.filter((task) => task.projectId === project.id && task.sectionId === null) }),
+    ...sections.filter((section) => section.projectId === project.id).map((section) => Object.freeze({
+      title: `${project.title} / ${section.title}`,
+      tasks: tasks.filter((task) => task.projectId === project.id && task.sectionId === section.id)
+    }))
+  ])
+]);
 
 const copyText = async (text: string) => {
   if (navigator.clipboard !== undefined) {
@@ -483,7 +499,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const [addTaskDescription, setAddTaskDescription] = useState("");
   const [addTaskDate, setAddTaskDate] = useState("");
   const [addTaskLabels, setAddTaskLabels] = useState("");
-  const [addTaskProjectId, setAddTaskProjectId] = useState<ProjectId | null>(null);
+  const [addTaskPlacement, setAddTaskPlacement] = useState(inboxPlacement);
   const [title, setTitle] = useState("");
   const [projectTitle, setProjectTitle] = useState("");
   const [sectionTitle, setSectionTitle] = useState("");
@@ -548,13 +564,14 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
       const isTyping = target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
       if (!isTyping && detailsTaskId === null && markdownModal === null && !addTaskOpen && !event.ctrlKey && !event.metaKey && !event.altKey && ["q", "й"].includes(event.key.toLocaleLowerCase())) {
         event.preventDefault();
-        setAddTaskProjectId(currentPath === "/" ? targetProjectId : null);
+        setAddTaskPlacement(currentPath === "/" ? (targetSectionId === null ? targetProjectId === null ? inboxPlacement : projectPlacement(targetProjectId) : sectionPlacement(targetSectionId)) : inboxPlacement);
+        setAddTaskPlacement(currentPath === "/" ? (targetSectionId === null ? targetProjectId === null ? inboxPlacement : projectPlacement(targetProjectId) : sectionPlacement(targetSectionId)) : inboxPlacement);
         setAddTaskTitle(""); setAddTaskDescription(""); setAddTaskDate(""); setAddTaskLabels(""); setAddTaskOpen(true);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [detailsTaskId, markdownModal, addTaskOpen, editingDetailField, datePickerOpen, detailLabelInput, targetProjectId, currentPath]);
+  }, [detailsTaskId, markdownModal, addTaskOpen, editingDetailField, datePickerOpen, detailLabelInput, targetProjectId, targetSectionId, currentPath]);
   const tasks = useQuery({
     queryKey: taskQueryKey,
     queryFn: api.listTasks
@@ -949,14 +966,14 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const allTasks = tasks.data ?? Object.freeze([]);
   const flatTasks = flattenTaskNodes(allTasks);
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("addTask") === "1") { setAddTaskProjectId(targetProjectId); setAddTaskOpen(true); window.history.replaceState({}, "", window.location.pathname); }
+    if (new URLSearchParams(window.location.search).get("addTask") === "1") { setAddTaskPlacement(targetProjectId === null ? inboxPlacement : projectPlacement(targetProjectId)); setAddTaskOpen(true); window.history.replaceState({}, "", window.location.pathname); }
     const taskId = new URLSearchParams(window.location.search).get("task");
     const task = taskId === null ? null : findTaskNode(allTasks, taskId);
     if (task !== null) {
       openDetails(task);
       window.history.replaceState({}, "", window.location.pathname);
     }
-  }, [allTasks]);
+  }, [allTasks, targetProjectId]);
   const allProjects = projects.data ?? Object.freeze([]);
   const activeProjects = allProjects.filter((project) => !project.archived);
   const allSections = sections.data ?? Object.freeze([]);
@@ -1045,6 +1062,22 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     : filterTaskTree(allTasks, (task) => task.labels.length > 0 && (!selectedLabel || task.labels.includes(selectedLabel)));
   const viewTitle = pageMode === "dates" ? "Dates" : pageMode === "labels" ? (selectedLabel ? `Label: ${selectedLabel}` : "Labels") : targetProjectId === null ? "Inbox" : taskTargetLabel;
   const markdown = currentMarkdown(taskTargetLabel, inboxRootTasks, allSections, allTasks, targetProjectId);
+  const openAddTaskDialog = (placement: string) => {
+    setAddTaskPlacement(placement);
+    setAddTaskTitle("");
+    setAddTaskDescription("");
+    setAddTaskDate("");
+    setAddTaskLabels("");
+    setAddTaskOpen(true);
+  };
+  const deleteAllTasks = async () => {
+    const roots = flatTasks.filter((task) => task.parentId === null && task.projectId === targetProjectId);
+    if (roots.length === 0) return;
+    const scope = targetProjectId === null ? "Inbox" : allProjects.find((project) => project.id === targetProjectId)?.title ?? "this project";
+    if (!confirmDeletion(`Delete all ${roots.length} top-level tasks in ${scope}, including their subtasks?`)) return;
+    await Promise.all(roots.map((task) => api.deleteTask(task.id)));
+    await queryClient.invalidateQueries({ queryKey: taskQueryKey });
+  };
 
   const copyMarkdown = async () => {
     await copyText(markdown);
@@ -1061,9 +1094,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     downloadBlob(await createZipBlob(allMarkdownFiles(allProjects, allSections, allTasks)), "todoist-clone-markdown.zip");
   };
 
-  const allMarkdown = allMarkdownFiles(allProjects, allSections, allTasks)
-    .map((file) => file.content)
-    .join("\n\n---\n\n");
+  const allMarkdown = allMarkdownDocument(allProjects, allSections, allTasks);
 
   const exportMarkdown = () => {
     downloadBlob(new Blob([allMarkdown], { type: "text/markdown;charset=utf-8" }), "todoist-clone.md");
@@ -1078,7 +1109,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
           <strong>Todoist Clone</strong>
         </div>
         <SearchPalette tasks={flatTasks} projects={allProjects} sections={allSections} onTaskSelect={(task) => { const node = findTaskNode(allTasks, task.id); if (node !== null) openDetails(node); }} />
-        <button type="button" className="nav-button add-task-nav-button" onClick={() => { setAddTaskProjectId(pageMode === "tasks" ? targetProjectId : null); setAddTaskTitle(""); setAddTaskDescription(""); setAddTaskDate(""); setAddTaskLabels(""); setAddTaskOpen(true); }}><Plus size={17} aria-hidden="true" />Add task <kbd>Q</kbd></button>
+        <button type="button" className="nav-button add-task-nav-button" onClick={() => openAddTaskDialog(pageMode === "tasks" ? (targetSectionId === null ? targetProjectId === null ? inboxPlacement : projectPlacement(targetProjectId) : sectionPlacement(targetSectionId)) : inboxPlacement)}><Plus size={17} aria-hidden="true" />Add task <kbd>Q</kbd></button>
         <button
           type="button"
           className={["nav-button", pageMode === "tasks" && targetProjectId === null && targetSectionId === null ? "active" : ""].filter(Boolean).join(" ")}
@@ -1209,6 +1240,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
             </button>
             {copyStatus.length > 0 ? <span className="muted">{copyStatus}</span> : null}
           </div> : null}
+          {pageMode === "tasks" ? <button type="button" className="btn btn-outline-danger delete-all-tasks-button" disabled={!flatTasks.some((task) => task.parentId === null && task.projectId === targetProjectId)} onClick={() => void deleteAllTasks()}><Trash2 size={15} aria-hidden="true" />Delete all tasks</button> : null}
         </header>
 
 
@@ -1231,7 +1263,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
               onDrop={moveDroppedTask(null, null)}
               aria-label="Inbox tasks"
             >
-              <h2>Inbox</h2>
+              <div className="task-scope-heading"><h2>Inbox</h2><button type="button" className="scope-add-task-button" aria-label="Add task to Inbox" onClick={() => openAddTaskDialog(inboxPlacement)}><Plus size={16} aria-hidden="true" />Add task</button></div>
               {inboxRootTasks.length > 0 ? renderTaskNodes(inboxRootTasks, taskActions) : <p className="empty">No inbox tasks yet.</p>}
             </section>
             <div className="section-create-block">
@@ -1278,6 +1310,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
                       <>
                         <h2>{section.title}</h2>
                         <div className="section-actions">
+                          <button type="button" aria-label={`Add task to section ${section.title}`} onClick={() => openAddTaskDialog(sectionPlacement(section.id))}><Plus size={14} aria-hidden="true" />Add task</button>
                           <button type="button" aria-label={`Edit section ${section.title}`} onClick={() => startSectionEdit(section)}>
                             <Edit3 size={14} aria-hidden="true" />
                             Edit
@@ -1310,7 +1343,8 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
               onDrop={moveDroppedTask(targetProjectId, null)}
               aria-label={`${taskTargetLabel} tasks`}
             >
-              {allTasks.filter((task) => task.projectId === targetProjectId && task.sectionId === null).length > 0
+            <div className="task-scope-heading project-task-scope-heading"><button type="button" className="scope-add-task-button" aria-label={`Add task to ${taskTargetLabel}`} onClick={() => openAddTaskDialog(projectPlacement(targetProjectId))}><Plus size={16} aria-hidden="true" />Add task</button></div>
+            {allTasks.filter((task) => task.projectId === targetProjectId && task.sectionId === null).length > 0
                 ? renderTaskNodes(allTasks.filter((task) => task.projectId === targetProjectId && task.sectionId === null), taskActions)
                 : <p className="empty">No project tasks yet.</p>}
             </section>
@@ -1328,6 +1362,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
                     <label htmlFor={`section-edit-${section.id}`}>Section title</label><input id={`section-edit-${section.id}`} autoFocus value={editSectionTitle} onChange={(event) => setEditSectionTitle(event.target.value)} />
                     <button type="submit">Save section</button><button type="button" onClick={() => { setEditSectionId(null); setEditSectionTitle(""); }}>Cancel</button>
                   </form> : <><h2>{section.title}</h2><div className="section-actions">
+                    <button type="button" aria-label={`Add task to section ${section.title}`} onClick={() => openAddTaskDialog(sectionPlacement(section.id))}><Plus size={14} aria-hidden="true" />Add task</button>
                     <button type="button" aria-label={`Edit section ${section.title}`} onClick={() => startSectionEdit(section)}><Edit3 size={14} aria-hidden="true" />Edit</button>
                     <button type="button" className="danger" aria-label={`Delete section ${section.title}`} onClick={() => requestSectionDelete(section)}><Trash2 size={14} aria-hidden="true" />Delete</button>
                   </div></>}
@@ -1365,7 +1400,31 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
           </FloatingFocusManager>
         </FloatingOverlay>
       ) : null}
-      {addTaskOpen ? <div className="task-details-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setAddTaskOpen(false); }}><section className="add-task-dialog" role="dialog" aria-modal="true" aria-label="Add task" onKeyDown={(event) => { if (event.key === "Escape") setAddTaskOpen(false); }}><header><h2>Add task</h2><button type="button" aria-label="Close add task" onClick={() => setAddTaskOpen(false)}><X size={18} /></button></header><form onSubmit={async (event) => { event.preventDefault(); const taskTitle = addTaskTitle.trim(); if (!taskTitle) return; const created = await api.createTask(taskTitle, addTaskProjectId, null, null); const patch: Parameters<ApplicationApi["updateTask"]>[1] = { description: addTaskDescription, dueDate: addTaskDate || null, labels: addTaskLabels.split(",").map((label) => label.trim()).filter(Boolean) }; if (patch.description || patch.dueDate || patch.labels?.length) await api.updateTask(created.id, patch); await queryClient.invalidateQueries({ queryKey: taskQueryKey }); setAddTaskOpen(false); }}><label>Task name<AutoGrowTextarea autoFocus ariaLabel="New task title" value={addTaskTitle} onChange={setAddTaskTitle} required onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} /></label><label>Description<AutoGrowTextarea ariaLabel="New task description" value={addTaskDescription} onChange={setAddTaskDescription} /></label><label>Project<select aria-label="Add task project" value={addTaskProjectId ?? "inbox"} onChange={(event) => setAddTaskProjectId(event.target.value === "inbox" ? null : event.target.value)}><option value="inbox">Inbox</option>{activeProjects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}</select></label><label>Date<input aria-label="New task date" type="date" value={addTaskDate} onChange={(event) => setAddTaskDate(event.target.value)} /></label><label>Labels<input aria-label="New task labels" value={addTaskLabels} onChange={(event) => setAddTaskLabels(event.target.value)} placeholder="Separate labels with commas" /></label><div><button type="button" onClick={() => setAddTaskOpen(false)}>Cancel</button><button type="submit" className="btn-primary">Add task</button></div></form></section></div> : null}
+      {addTaskOpen ? <div className="task-details-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setAddTaskOpen(false); }}>
+        <section className="add-task-dialog" role="dialog" aria-modal="true" aria-label="Add task" onKeyDown={(event) => { if (event.key === "Escape") setAddTaskOpen(false); }}>
+          <header><h2>Add task</h2><button type="button" aria-label="Close add task" onClick={() => setAddTaskOpen(false)}><X size={18} /></button></header>
+          <form onSubmit={async (event) => {
+            event.preventDefault();
+            const taskTitle = addTaskTitle.trim();
+            if (!taskTitle) return;
+            const placement = parsePlacement(addTaskPlacement, allSections);
+            const created = await api.createTask(taskTitle, placement.projectId, placement.sectionId, null);
+            const patch: Parameters<ApplicationApi["updateTask"]>[1] = { description: addTaskDescription, dueDate: addTaskDate || null, labels: addTaskLabels.split(",").map((label) => label.trim()).filter(Boolean) };
+            if (patch.description || patch.dueDate || patch.labels?.length) await api.updateTask(created.id, patch);
+            await queryClient.invalidateQueries({ queryKey: taskQueryKey });
+            setAddTaskOpen(false);
+          }}>
+            <label>Task name<AutoGrowTextarea autoFocus ariaLabel="New task title" value={addTaskTitle} onChange={setAddTaskTitle} required onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} /></label>
+            <label>Description<AutoGrowTextarea ariaLabel="New task description" value={addTaskDescription} onChange={setAddTaskDescription} /></label>
+            <label>Project or section<select aria-label="Add task project" value={addTaskPlacement} onChange={(event) => setAddTaskPlacement(event.target.value)}>
+              {createPlacementOptions(activeProjects, allSections.filter((section) => section.projectId === null || activeProjects.some((project) => project.id === section.projectId))).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select></label>
+            <label>Date<input aria-label="New task date" type="date" value={addTaskDate} onChange={(event) => setAddTaskDate(event.target.value)} /></label>
+            <label>Labels<input aria-label="New task labels" value={addTaskLabels} onChange={(event) => setAddTaskLabels(event.target.value)} placeholder="Separate labels with commas" /></label>
+            <div><button type="button" onClick={() => setAddTaskOpen(false)}>Cancel</button><button type="submit" className="btn-primary">Add task</button></div>
+          </form>
+        </section>
+      </div> : null}
       {selectedDetailsTask !== null ? (
         <div className="task-details-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDetailsTaskId(null); }}>
           <section className="task-details-modal" role="dialog" aria-modal="true" aria-label={`Task details: ${selectedDetailsTask.title}`} onKeyDown={(event) => { if (event.key === "Escape" && editingDetailField === null && !datePickerOpen) setDetailsTaskId(null); }}>

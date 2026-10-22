@@ -165,9 +165,21 @@ const renderTaskMarkdown = (task: TaskNode, depth: number): ReadonlyArray<string
 
 export const renderTaskMarkdownDocument = (
   title: string,
-  tasks: ReadonlyArray<TaskNode>
+  tasks: ReadonlyArray<TaskNode>,
+  sections: ReadonlyArray<Readonly<{ title: string; tasks: ReadonlyArray<TaskNode> }>> = Object.freeze([])
 ): string => {
   const body = tasks.flatMap((task) => renderTaskMarkdown(task, 0));
-
-  return [`# ${title}`, "", ...(body.length > 0 ? body : ["_No tasks._"]), ""].join("\n");
+  const sectionContent = sections.flatMap((section, index) => [
+    ...(body.length > 0 || index > 0 ? [""] : []),
+    `## ${section.title}`,
+    "",
+    ...(section.tasks.length > 0 ? section.tasks.flatMap((task) => renderTaskMarkdown(task, 0)) : ["_No tasks._"])
+  ]);
+  return [
+    `# ${title}`,
+    "",
+    ...(body.length > 0 ? body : sections.length === 0 ? ["_No tasks._"] : []),
+    ...sectionContent,
+    ""
+  ].join("\n");
 };

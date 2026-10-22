@@ -169,6 +169,60 @@ test("opens settings with deletion confirmation enabled by default", async ({ pa
   await expect(page.getByRole("radio", { name: /Anonymous access/ })).toBeChecked();
 });
 
+test("adds tasks directly to sections and deletes all tasks within Inbox or a project", async ({ page }, testInfo) => {
+  const suffix = `${testInfo.workerIndex}-${Date.now()}`;
+  const inboxSection = `Inbox section ${suffix}`;
+  const inboxTask = `Inbox scoped task ${suffix}`;
+  const inboxSectionTask = `Inbox section task ${suffix}`;
+  const project = `Scoped project ${suffix}`;
+  const projectSection = `Project section ${suffix}`;
+  const projectTask = `Project scoped task ${suffix}`;
+  const projectSectionTask = `Project section task ${suffix}`;
+
+  await page.goto("/");
+  await page.getByLabel("Inbox tasks").getByRole("button", { name: "Add task to Inbox" }).click();
+  const inboxRootDialog = page.getByRole("dialog", { name: "Add task" });
+  await expect(inboxRootDialog.getByLabel("Add task project")).toHaveValue("inbox");
+  await inboxRootDialog.getByLabel("New task title").fill(inboxTask);
+  await inboxRootDialog.getByRole("button", { name: "Add task", exact: true }).click();
+  await expect(inboxRootDialog).not.toBeVisible();
+  await createSection(page)(inboxSection);
+  const inboxSectionRegion = page.getByLabel(`Section ${inboxSection}`);
+  await inboxSectionRegion.getByRole("button", { name: `Add task to section ${inboxSection}` }).click();
+  const inboxSectionDialog = page.getByRole("dialog", { name: "Add task" });
+  await expect(inboxSectionDialog.getByLabel("Add task project")).toHaveValue(/^section:/);
+  await inboxSectionDialog.getByLabel("New task title").fill(inboxSectionTask);
+  await inboxSectionDialog.getByRole("button", { name: "Add task", exact: true }).click();
+  await expect(inboxSectionRegion.getByText(inboxSectionTask)).toBeVisible();
+  await expect(inboxSectionDialog).not.toBeVisible();
+
+  await createProject(page)(project);
+  await createSection(page)(projectSection);
+  await page.getByLabel(`${project} tasks`).getByRole("button", { name: `Add task to ${project}` }).click();
+  const projectRootDialog = page.getByRole("dialog", { name: "Add task" });
+  await expect(projectRootDialog.getByLabel("Add task project")).toHaveValue(/^project:/);
+  await projectRootDialog.getByLabel("New task title").fill(projectTask);
+  await projectRootDialog.getByRole("button", { name: "Add task", exact: true }).click();
+  await expect(projectRootDialog).not.toBeVisible();
+  const projectSectionRegion = page.getByLabel(`Section ${projectSection}`);
+  await projectSectionRegion.getByRole("button", { name: `Add task to section ${projectSection}` }).click();
+  const projectSectionDialog = page.getByRole("dialog", { name: "Add task" });
+  await expect(projectSectionDialog.getByLabel("Add task project")).toHaveValue(/^section:/);
+  await expect(projectSectionDialog.getByLabel("Add task project").locator("option", { hasText: `${project} / ${projectSection}` })).toHaveCount(1);
+  await projectSectionDialog.getByLabel("New task title").fill(projectSectionTask);
+  await projectSectionDialog.getByRole("button", { name: "Add task", exact: true }).click();
+  await expect(projectSectionRegion.getByText(projectSectionTask)).toBeVisible();
+
+  await page.getByRole("button", { name: "Delete all tasks" }).click();
+  await expect(page.getByRole("button", { name: projectTask, exact: true })).not.toBeVisible();
+  await expect(page.getByRole("button", { name: projectSectionTask, exact: true })).not.toBeVisible();
+  await page.getByRole("button", { name: "Inbox", exact: true }).click();
+  await expect(page.getByRole("button", { name: inboxTask, exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Delete all tasks" }).click();
+  await expect(page.getByRole("button", { name: inboxTask, exact: true })).not.toBeVisible();
+  await expect(page.getByRole("button", { name: inboxSectionTask, exact: true })).not.toBeVisible();
+});
+
 test("creates projects, sections, subtasks, and exports markdown", async ({ context, page }, testInfo) => {
   const suffix = `${testInfo.workerIndex}-${Date.now()}`;
   const projectTitle = `Roadmap ${suffix}`;
@@ -214,8 +268,12 @@ test("creates projects, sections, subtasks, and exports markdown", async ({ cont
   await expect(page.getByLabel(`Section ${projectSection}`).getByText(subtask)).toBeVisible();
 
   await page.getByRole("button", { name: "Preview markdown" }).click();
-  await expect(page.getByRole("dialog", { name: "Markdown preview" }).getByText(projectTask)).toBeVisible();
-  await expect(page.getByRole("dialog", { name: "Markdown preview" }).getByText(subtask)).toBeVisible();
+  const markdownPreview = page.getByRole("dialog", { name: "Markdown preview" });
+  await expect(markdownPreview.getByText(projectTask)).toBeVisible();
+  await expect(markdownPreview.getByText(subtask)).toBeVisible();
+  const projectMarkdown = await markdownPreview.locator("pre").textContent() ?? "";
+  expect(projectMarkdown.match(/^# /gm)).toHaveLength(1);
+  expect(projectMarkdown).toContain(`## ${projectSection}`);
   await page.getByRole("button", { name: "Close" }).click();
 
   await page.getByRole("button", { name: "Inbox" }).click();
