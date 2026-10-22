@@ -208,6 +208,38 @@ test("creates a task in the browser", async ({ page }, testInfo) => {
   await expect(page.getByText(editedTitle)).not.toBeVisible();
 });
 
+test("adapts task details to a small mobile viewport", async ({ page }, testInfo) => {
+  const title = `Mobile task details with a long wrapping title ${testInfo.workerIndex}-${Date.now()}`;
+  await page.goto("/");
+  await createTask(page)(title);
+  await page.setViewportSize({ width: 360, height: 640 });
+  await page.getByRole("button", { name: title, exact: true }).click();
+
+  const dialog = page.getByRole("dialog", { name: `Task details: ${title}` });
+  const bounds = await dialog.boundingBox();
+  if (bounds === null) throw new Error("Task details dialog must be visible");
+  expect(bounds.x).toBe(0);
+  expect(bounds.y).toBe(0);
+  expect(bounds.width).toBe(360);
+  expect(bounds.height).toBe(640);
+  await expect(dialog.getByRole("button", { name: "Close task details" })).toHaveCSS("min-height", "42px");
+  await expect(dialog.getByRole("button", { name: "Edit task title" })).toHaveCSS("white-space", "pre-wrap");
+
+  const layout = dialog.locator(".task-details-layout");
+  expect(await layout.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  const metadataTop = await dialog.locator(".task-details-sidebar").evaluate((element) => element.getBoundingClientRect().top);
+  const subtasksTop = await dialog.locator(".task-subtasks-card").evaluate((element) => element.getBoundingClientRect().top);
+  expect(metadataTop).toBeLessThan(subtasksTop);
+
+  await dialog.getByLabel("Project, section, or Inbox").scrollIntoViewIfNeeded();
+  await expect(dialog.getByLabel("Project, section, or Inbox")).toBeVisible();
+  await dialog.getByLabel("Add comment").scrollIntoViewIfNeeded();
+  expect(await dialog.locator(".task-comments").evaluate((comments) => {
+    const button = comments.querySelector<HTMLElement>(".btn-primary");
+    return button !== null && button.getBoundingClientRect().width >= comments.getBoundingClientRect().width - 33;
+  })).toBe(true);
+});
+
 test("opens settings with deletion confirmation enabled by default", async ({ page }) => {
   await page.goto("/settings");
 
