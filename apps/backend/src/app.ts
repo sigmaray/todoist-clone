@@ -37,8 +37,10 @@ const moveTaskSchema = z.object({
 });
 
 const createProjectSchema = z.object({
-  title: z.string().trim().min(1)
+  title: z.string().trim().min(1),
+  parentId: z.string().nullable().default(null)
 });
+const moveProjectSchema = z.object({ parentId: z.string().nullable() });
 
 const patchProjectSchema = z.object({
   title: z.string().trim().min(1).optional(),
@@ -237,9 +239,18 @@ export const createApp = (
       return context.json({ error: "Invalid project payload" }, 400);
     }
 
-    const project = await repository.createProject(result.data.title);
+    if (result.data.parentId !== null && !(await repository.listProjects()).some((project) => project.id === result.data.parentId)) return context.json({ error: "Parent project not found" }, 404);
+    const project = result.data.parentId === null ? await repository.createProject(result.data.title) : await repository.createSubproject(result.data.title, result.data.parentId);
 
     return context.json({ project }, 201);
+  });
+
+  app.patch("/projects/:id/parent", async (context) => {
+    const result = moveProjectSchema.safeParse(await parseJson(context.req.raw));
+    if (!result.success) return context.json({ error: "Invalid project parent" }, 400);
+    if (result.data.parentId !== null && !(await repository.listProjects()).some((project) => project.id === result.data.parentId)) return context.json({ error: "Parent project not found" }, 404);
+    const project = await repository.moveProject(context.req.param("id"), result.data.parentId);
+    return project === null ? context.json({ error: "Project not found or invalid parent" }, 404) : context.json({ project });
   });
 
   app.patch("/projects/:id", async (context) => {

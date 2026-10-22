@@ -18,6 +18,21 @@ const createProject = (page: Page) => async (title: string) => {
   await page.getByRole("button", { name: "Save", exact: true }).click();
 };
 
+const dragProjectTo = (page: Page) => async (sourceTitle: string, targetTitle: string, yRatio: number) => {
+  await page.locator(".project-nav-row").filter({ has: page.getByRole("button", { name: sourceTitle, exact: true }) }).evaluate(async (source, data) => {
+    const target = [...document.querySelectorAll(".project-nav-row")].find((row) => row.textContent?.includes(data.targetTitle));
+    if (!target) throw new Error("Project target not found");
+    const rect = target.getBoundingClientRect();
+    const y = rect.top + rect.height * data.yRatio;
+    const transfer = new DataTransfer();
+    transfer.setData("application/x-project-id", source.getAttribute("data-project-id") ?? "");
+    source.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: transfer }));
+    target.dispatchEvent(new DragEvent("dragover", { bubbles: true, dataTransfer: transfer, clientY: y }));
+    target.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer: transfer, clientY: y }));
+    source.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer: transfer }));
+  }, { targetTitle, yRatio });
+};
+
 const createSection = (page: Page) => async (title: string) => {
   await page.getByRole("button", { name: "Add section" }).click();
   await page.getByLabel("Section title").fill(title);
@@ -373,4 +388,26 @@ test("creates projects, sections, subtasks, and exports markdown", async ({ cont
   await page.locator(`summary[aria-label="Project menu ${projectTitle} edited"]`).click();
   await page.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(page.getByRole("button", { name: `${projectTitle} edited`, exact: true })).not.toBeVisible();
+});
+
+test("creates subprojects and drags projects into and out of a parent", async ({ page }, testInfo) => {
+  const suffix = `${Date.now()}-${testInfo.workerIndex}`;
+  const root = `Root ${suffix}`;
+  const child = `Child ${suffix}`;
+  const grandchild = `Grandchild ${suffix}`;
+  await page.goto("/");
+  await createProject(page)(root);
+  await page.locator(`summary[aria-label="Project menu ${root}"]`).click();
+  await page.getByRole("button", { name: "＋ Add subproject" }).click();
+  await page.getByLabel("Project title").fill(child);
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.locator(".project-nav-row").filter({ hasText: child })).toHaveCSS("padding-inline-start", "18px");
+  await page.locator(`summary[aria-label="Project menu ${child}"]`).click();
+  await page.getByRole("button", { name: "＋ Add subproject" }).click();
+  await page.getByLabel("Project title").fill(grandchild);
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await dragProjectTo(page)(grandchild, root, 0.5);
+  await expect(page.locator(".project-nav-row").filter({ hasText: grandchild })).toHaveCSS("padding-inline-start", "18px");
+  await dragProjectTo(page)(grandchild, root, 0.1);
+  await expect(page.locator(".project-nav-row").filter({ hasText: grandchild })).toHaveCSS("padding-inline-start", "0px");
 });

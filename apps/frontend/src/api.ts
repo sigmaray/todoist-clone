@@ -3,7 +3,8 @@ import type { Project, ProjectId, Section, SectionId, Task, TaskNode } from "@to
 export type TaskApi = Readonly<{
   listTasks: () => Promise<ReadonlyArray<TaskNode>>;
   listProjects: () => Promise<ReadonlyArray<Project>>;
-  createProject: (title: string) => Promise<Project>;
+  createProject: (title: string, parentId?: ProjectId | null) => Promise<Project>;
+  moveProject: (id: ProjectId, parentId: ProjectId | null) => Promise<Project>;
   reorderProject: (id: ProjectId, beforeId: ProjectId | null, afterId: ProjectId | null) => Promise<Project>;
   updateProject: (id: ProjectId, patch: Readonly<{ title?: string; description?: string }>) => Promise<Project>;
   getInboxDescription: () => Promise<string>;
@@ -108,9 +109,13 @@ export const createTaskApi = (baseUrl = ""): ApplicationApi =>
 
       return data.projects;
     },
-    createProject: async (title) => {
-      const data = await postJson<{ project: Project }>(`${baseUrl}/projects`, { title });
+    createProject: async (title, parentId = null) => {
+      const data = await postJson<{ project: Project }>(`${baseUrl}/projects`, { title, parentId });
 
+      return data.project;
+    },
+    moveProject: async (id, parentId) => {
+      const data = await readJson<{ project: Project }>(await fetch(`${baseUrl}/projects/${id}/parent`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ parentId }) }));
       return data.project;
     },
     reorderProject: async (id, beforeId, afterId) => {

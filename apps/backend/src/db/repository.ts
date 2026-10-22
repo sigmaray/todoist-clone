@@ -36,6 +36,7 @@ const toProject = (row: ProjectRow): Project =>
     title: row.title,
     description: row.description,
     archived: row.archived,
+    parentId: row.parentId,
     lexicalOrder: row.lexicalOrder,
     createdAt: normalizeDate(row.createdAt),
     updatedAt: normalizeDate(row.updatedAt)
@@ -117,13 +118,14 @@ export const createPostgresTaskRepository = (databaseUrl: string): TaskRepositor
       return Object.freeze(rows.map(toProject));
     },
     createProject: async (title) => {
-      const siblings = await db.select().from(projectsTable).orderBy(projectOrder);
+      const siblings = await db.select().from(projectsTable).where(isNull(projectsTable.parentId)).orderBy(projectOrder);
       const rows = await db
         .insert(projectsTable)
         .values({
           id: crypto.randomUUID(),
           title,
-        archived: false,
+          archived: false,
+          parentId: null,
           lexicalOrder: generateLexicalOrder(siblings.at(-1)?.lexicalOrder ?? null, null)
         })
         .returning();
@@ -135,9 +137,35 @@ export const createPostgresTaskRepository = (databaseUrl: string): TaskRepositor
 
       return project;
     },
+    createSubproject: async (title, parentId) => {
+      const parent = await db.select({ id: projectsTable.id }).from(projectsTable).where(eq(projectsTable.id, parentId)).limit(1);
+      if (parent.length === 0) throw new Error("Parent project not found");
+      const siblings = await db.select().from(projectsTable).where(eq(projectsTable.parentId, parentId)).orderBy(projectOrder);
+      const rows = await db.insert(projectsTable).values({ id: crypto.randomUUID(), title, parentId, archived: false, lexicalOrder: generateLexicalOrder(siblings.at(-1)?.lexicalOrder ?? null, null) }).returning();
+      const project = firstProject(rows);
+      if (project === null) throw new Error("Project insert failed");
+      return project;
+    },
+    moveProject: async (id, parentId) => {
+      if (parentId === id) return null;
+      if (parentId !== null) {
+        const rows = await db.select().from(projectsTable);
+        if (!rows.some((project) => project.id === parentId)) return null;
+        let ancestor: string | null = parentId;
+        while (ancestor !== null) { if (ancestor === id) return null; ancestor = rows.find((project) => project.id === ancestor)?.parentId ?? null; }
+      }
+      const existingRows = await db.select().from(projectsTable).where(eq(projectsTable.id, id)).limit(1);
+      const existing = existingRows[0];
+      if (existing === undefined) return null;
+      const siblings = await db.select().from(projectsTable).where(nullableEq(projectsTable.parentId, parentId)).orderBy(projectOrder);
+      const rows = await db.update(projectsTable).set({ parentId, lexicalOrder: generateLexicalOrder(siblings.filter((project) => project.id !== id).at(-1)?.lexicalOrder ?? null, null), updatedAt: new Date() }).where(eq(projectsTable.id, id)).returning();
+      return firstProject(rows);
+    },
     reorderProject: async (id, beforeId, afterId) => {
-      const ordered = await db.select().from(projectsTable).orderBy(projectOrder);
-      const siblings = ordered.filter((project) => project.id !== id);
+      const existingRows = await db.select().from(projectsTable).where(eq(projectsTable.id, id)).limit(1);
+      const existing = existingRows[0];
+      if (existing === undefined) return null;
+      const siblings = (await db.select().from(projectsTable).where(nullableEq(projectsTable.parentId, existing.parentId)).orderBy(projectOrder)).filter((project) => project.id !== id);
       const beforeIndex = beforeId === null ? -1 : siblings.findIndex((project) => project.id === beforeId);
       const afterIndex = afterId === null ? -1 : siblings.findIndex((project) => project.id === afterId);
       const low = afterIndex >= 0 ? siblings[afterIndex]?.lexicalOrder ?? null : beforeId === null && afterId === null ? siblings.at(-1)?.lexicalOrder ?? null : null;
@@ -158,6 +186,9 @@ export const createPostgresTaskRepository = (databaseUrl: string): TaskRepositor
       return firstProject(rows);
     },
     deleteProject: async (id) => {
+      const parentRows = await db.select({ parentId: projectsTable.parentId }).from(projectsTable).where(eq(projectsTable.id, id)).limit(1);
+      const parentId = parentRows[0]?.parentId ?? null;
+      await db.update(projectsTable).set({ parentId, updatedAt: new Date() }).where(eq(projectsTable.parentId, id));
       const rows = await db
         .delete(projectsTable)
         .where(eq(projectsTable.id, id))
@@ -197,7 +228,7 @@ export const createPostgresTaskRepository = (databaseUrl: string): TaskRepositor
       const sourceTasks = await db.select().from(tasksTable).where(eq(tasksTable.projectId, id)).orderBy(rowOrder);
       const createdAt = new Date();
       const newProjectId = crypto.randomUUID();
-      const copiedProject = await db.insert(projectsTable).values({ id: newProjectId, title: `${source.title} copy`, description: source.description, archived: false, lexicalOrder: generateLexicalOrder(source.lexicalOrder, null) }).returning();
+      const copiedProject = await db.insert(projectsTable).values({ id: newProjectId, title: `${source.title} copy`, description: source.description, archived: false, parentId: source.parentId, lexicalOrder: generateLexicalOrder(source.lexicalOrder, null) }).returning();
       const sectionMap = new Map(sourceSections.map((section) => [section.id, crypto.randomUUID()]));
       if (sourceSections.length) await db.insert(sectionsTable).values(sourceSections.map((section) => ({ id: sectionMap.get(section.id)!, title: section.title, projectId: newProjectId, lexicalOrder: section.lexicalOrder })));
       const taskMap = new Map(sourceTasks.map((task) => [task.id, crypto.randomUUID()]));

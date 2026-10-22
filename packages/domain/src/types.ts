@@ -27,6 +27,7 @@ export type Project = Readonly<{
   title: string;
   description: string;
   archived: boolean;
+  parentId: ProjectId | null;
   lexicalOrder: string;
   createdAt: string;
   updatedAt: string;

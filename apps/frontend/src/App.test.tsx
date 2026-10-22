@@ -28,6 +28,7 @@ const project = (values: Partial<Project> & Pick<Project, "id" | "title">): Proj
   Object.freeze({
     description: "",
     archived: false,
+    parentId: null,
     lexicalOrder: "U",
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -65,11 +66,13 @@ const baseApi = (tasks: ReadonlyArray<TaskNode>): ApplicationApi =>
         title,
         description: "",
         archived: false,
+        parentId: null,
         lexicalOrder: "U",
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z"
       }),
     reorderProject: async (id) => project({ id, title: "Reordered" }),
+    moveProject: async (id, parentId) => project({ id, title: "Project", parentId }),
     updateProject: async (id, patch) => project({ id, title: patch.title ?? "Project", description: patch.description ?? "" }),
     getInboxDescription: async () => "",
     updateInboxDescription: async () => undefined,
@@ -308,7 +311,7 @@ describe("TaskApp", () => {
     await userEvent.type(screen.getByLabelText("Project title"), "Roadmap");
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() => expect(createProject).toHaveBeenCalledWith("Roadmap"));
+    await waitFor(() => expect(createProject).toHaveBeenCalledWith("Roadmap", null));
     expect(await screen.findByRole("button", { name: "Roadmap" })).toBeInTheDocument();
   });
 

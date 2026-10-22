@@ -24,6 +24,8 @@ export type TaskRepository = Readonly<{
   list: () => Promise<ReadonlyArray<Task>>;
   listProjects: () => Promise<ReadonlyArray<Project>>;
   createProject: (title: string) => Promise<Project>;
+  createSubproject: (title: string, parentId: ProjectId) => Promise<Project>;
+  moveProject: (id: ProjectId, parentId: ProjectId | null) => Promise<Project | null>;
   reorderProject: (id: ProjectId, beforeId: ProjectId | null, afterId: ProjectId | null) => Promise<Project | null>;
   updateProject: (id: ProjectId, patch: Readonly<{ title?: string; description?: string }>) => Promise<Project | null>;
   deleteProject: (id: ProjectId) => Promise<boolean>;
@@ -98,12 +100,14 @@ export const createMemoryTaskRepository = (
     listProjects: async () => projects,
     createProject: async (title) => {
       const createdAt = now();
+      const siblings = projects.filter((project) => project.parentId === null).toSorted((left, right) => left.lexicalOrder.localeCompare(right.lexicalOrder));
       const project = Object.freeze({
         id: crypto.randomUUID(),
         title,
         description: "",
         archived: false,
-        lexicalOrder: generateLexicalOrder(projects.at(-1)?.lexicalOrder ?? null, null),
+        parentId: null,
+        lexicalOrder: generateLexicalOrder(siblings.at(-1)?.lexicalOrder ?? null, null),
         createdAt,
         updatedAt: createdAt
       });
@@ -112,14 +116,32 @@ export const createMemoryTaskRepository = (
 
       return project;
     },
+    createSubproject: async (title, parentId) => {
+      if (!projects.some((project) => project.id === parentId)) throw new Error("Parent project not found");
+      const createdAt = now();
+      const siblings = projects.filter((item) => item.parentId === parentId).toSorted((left, right) => left.lexicalOrder.localeCompare(right.lexicalOrder));
+      const project = Object.freeze({ id: crypto.randomUUID(), title, description: "", archived: false, parentId, lexicalOrder: generateLexicalOrder(siblings.at(-1)?.lexicalOrder ?? null, null), createdAt, updatedAt: createdAt });
+      projects = Object.freeze([...projects, project]);
+      return project;
+    },
+    moveProject: async (id, parentId) => {
+      const existing = projects.find((item) => item.id === id);
+      if (!existing || (parentId !== null && !projects.some((item) => item.id === parentId)) || parentId === id) return null;
+      let ancestor = parentId;
+      while (ancestor !== null) { if (ancestor === id) return null; ancestor = projects.find((item) => item.id === ancestor)?.parentId ?? null; }
+      const siblings = projects.filter((item) => item.parentId === parentId && item.id !== id).toSorted((left, right) => left.lexicalOrder.localeCompare(right.lexicalOrder));
+      const moved = Object.freeze({ ...existing, parentId, lexicalOrder: generateLexicalOrder(siblings.at(-1)?.lexicalOrder ?? null, null), updatedAt: now() });
+      projects = Object.freeze(projects.map((item) => item.id === id ? moved : item));
+      return moved;
+    },
     reorderProject: async (id, beforeId, afterId) => {
-      const ordered = projects.filter((project) => project.id !== id).toSorted((left, right) => left.lexicalOrder < right.lexicalOrder ? -1 : left.lexicalOrder > right.lexicalOrder ? 1 : 0);
+      const existing = projects.find((project) => project.id === id);
+      if (!existing) return null;
+      const ordered = projects.filter((project) => project.parentId === existing.parentId && project.id !== id).toSorted((left, right) => left.lexicalOrder < right.lexicalOrder ? -1 : left.lexicalOrder > right.lexicalOrder ? 1 : 0);
       const beforeIndex = beforeId === null ? -1 : ordered.findIndex((project) => project.id === beforeId);
       const afterIndex = afterId === null ? -1 : ordered.findIndex((project) => project.id === afterId);
       const low = afterIndex >= 0 ? ordered[afterIndex]?.lexicalOrder ?? null : beforeId === null && afterId === null ? ordered.at(-1)?.lexicalOrder ?? null : null;
       const high = beforeIndex >= 0 ? ordered[beforeIndex]?.lexicalOrder ?? null : null;
-      const existing = projects.find((project) => project.id === id);
-      if (!existing) return null;
       const reordered = Object.freeze({ ...existing, lexicalOrder: generateLexicalOrder(low, high), updatedAt: now() });
       projects = Object.freeze(projects.map((project) => project.id === id ? reordered : project).toSorted((left, right) => left.lexicalOrder < right.lexicalOrder ? -1 : left.lexicalOrder > right.lexicalOrder ? 1 : 0));
       return reordered;
@@ -156,7 +178,7 @@ export const createMemoryTaskRepository = (
 
       replace(tasks.filter((task) => !doomedIds.has(task.id)));
       sections = Object.freeze(sections.filter((section) => section.projectId !== id));
-      projects = Object.freeze(projects.filter((project) => project.id !== id));
+      projects = Object.freeze(projects.filter((project) => project.id !== id).map((project) => project.parentId === id ? Object.freeze({ ...project, parentId: existing.parentId, updatedAt: now() }) : project));
 
       return true;
     },
@@ -164,7 +186,8 @@ export const createMemoryTaskRepository = (
       const source = projects.find((project) => project.id === id);
       if (source === undefined) return null;
       const createdAt = now();
-      const duplicated = Object.freeze({ ...source, id: crypto.randomUUID(), title: `${source.title} copy`, archived: false, createdAt, updatedAt: createdAt });
+      const siblingProjects = projects.filter((project) => project.parentId === source.parentId).toSorted((left, right) => left.lexicalOrder.localeCompare(right.lexicalOrder));
+      const duplicated = Object.freeze({ ...source, id: crypto.randomUUID(), title: `${source.title} copy`, archived: false, lexicalOrder: generateLexicalOrder(source.lexicalOrder, siblingProjects.find((project) => project.lexicalOrder > source.lexicalOrder)?.lexicalOrder ?? null), createdAt, updatedAt: createdAt });
       const sourceSections = sections.filter((section) => section.projectId === id);
       const sectionMap = new Map(sourceSections.map((section) => [section.id, crypto.randomUUID()]));
       const newSections = sourceSections.map((section) => Object.freeze({ ...section, id: sectionMap.get(section.id)!, projectId: duplicated.id, createdAt, updatedAt: createdAt }));

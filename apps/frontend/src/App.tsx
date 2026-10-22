@@ -220,6 +220,22 @@ const renderTaskNodes = (
 
 const inboxPlacement = "inbox";
 const projectPlacement = (id: ProjectId) => `project:${id}`;
+const projectDepth = (projects: ReadonlyArray<Project>, project: Project): number => {
+  let depth = 0;
+  let parentId = project.parentId;
+  while (parentId !== null && depth < projects.length) {
+    const parent = projects.find((item) => item.id === parentId);
+    if (parent === undefined) break;
+    depth += 1;
+    parentId = parent.parentId;
+  }
+  return depth;
+};
+const projectTreeOrder = (projects: ReadonlyArray<Project>): ReadonlyArray<Project> => {
+  const byParent = (parentId: ProjectId | null) => projects.filter((item) => item.parentId === parentId || (parentId === null && item.parentId !== null && !projects.some((parent) => parent.id === item.parentId))).toSorted((a, b) => a.lexicalOrder.localeCompare(b.lexicalOrder));
+  const visit = (parentId: ProjectId | null): ReadonlyArray<Project> => byParent(parentId).flatMap((project) => [project, ...visit(project.id)]);
+  return Object.freeze(visit(null));
+};
 const sectionPlacement = (id: SectionId) => `section:${id}`;
 
 const taskPlacement = (task: TaskNode) =>
@@ -502,6 +518,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const [projectTitle, setProjectTitle] = useState("");
   const [sectionTitle, setSectionTitle] = useState("");
   const [addingProject, setAddingProject] = useState(false);
+  const [newProjectParentId, setNewProjectParentId] = useState<ProjectId | null>(null);
   const [addingSection, setAddingSection] = useState(false);
   const [editProjectId, setEditProjectId] = useState<ProjectId | null>(null);
   const [editProjectTitle, setEditProjectTitle] = useState("");
@@ -512,7 +529,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
   const [activeDragTarget, setActiveDragTarget] = useState<ActiveDragTarget | null>(null);
   const [activeDropZone, setActiveDropZone] = useState<DropZoneId | null>(null);
-  const [activeProjectDrop, setActiveProjectDrop] = useState<Readonly<{ id: ProjectId; position: "before" | "after" }> | null>(null);
+  const [activeProjectDrop, setActiveProjectDrop] = useState<Readonly<{ id: ProjectId; position: "before" | "after" | "inside" }> | null>(null);
   const [draggingProjectId, setDraggingProjectId] = useState<ProjectId | null>(null);
   const [activeSectionDrop, setActiveSectionDrop] = useState<Readonly<{ id: SectionId; position: "before" | "after" }> | null>(null);
   const [draggingSectionId, setDraggingSectionId] = useState<SectionId | null>(null);
@@ -625,10 +642,11 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   });
 
   const createProjectMutation = useMutation({
-    mutationFn: (nextTitle: string) => api.createProject(nextTitle),
+    mutationFn: (nextTitle: string) => api.createProject(nextTitle, newProjectParentId),
     onSuccess: (project) => {
       setProjectTitle("");
       setAddingProject(false);
+      setNewProjectParentId(null);
       setTargetProjectId(project.id);
       setTargetSectionId(null);
       window.history.pushState({}, "", `/?project=${encodeURIComponent(project.id)}`);
@@ -674,6 +692,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const archiveProjectMutation = useMutation({ mutationFn: ({ id, archived }: Readonly<{ id: ProjectId; archived: boolean }>) => api.archiveProject(id, archived), onSuccess: (project) => queryClient.setQueryData(projectQueryKey, (current: ReadonlyArray<Project> | undefined) => replaceById(current, project)) });
 
   const reorderProjectMutation = useMutation({ mutationFn: ({ id, beforeId, afterId }: Readonly<{ id: ProjectId; beforeId: ProjectId | null; afterId: ProjectId | null }>) => api.reorderProject(id, beforeId, afterId), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: projectQueryKey }); } });
+  const moveProjectMutation = useMutation({ mutationFn: ({ id, parentId }: Readonly<{ id: ProjectId; parentId: ProjectId | null }>) => api.moveProject(id, parentId), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: projectQueryKey }); } });
   const reorderSectionMutation = useMutation({ mutationFn: ({ id, beforeId, afterId }: Readonly<{ id: SectionId; beforeId: SectionId | null; afterId: SectionId | null }>) => api.reorderSection(id, beforeId, afterId), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: sectionQueryKey }); } });
 
   const requestProjectDelete = (project: Project) => {
@@ -814,7 +833,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     }
   };
 
-  const cancelProjectCreate = () => { setAddingProject(false); setProjectTitle(""); };
+  const cancelProjectCreate = () => { setAddingProject(false); setProjectTitle(""); setNewProjectParentId(null); };
 
   const submitProjectEdit = (project: Project) => (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -914,21 +933,30 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     if (!event.dataTransfer.types.includes("application/x-project-id")) return;
     event.preventDefault();
     const rect = event.currentTarget.getBoundingClientRect();
-    setActiveProjectDrop(Object.freeze({ id: project.id, position: event.clientY < rect.top + rect.height / 2 ? "before" : "after" }));
+    const relativeY = (event.clientY - rect.top) / rect.height;
+    setActiveProjectDrop(Object.freeze({ id: project.id, position: relativeY < 0.32 ? "before" : relativeY > 0.68 ? "after" : "inside" }));
   };
   const dropProject = (project: Project) => (event: DragEvent<HTMLElement>) => {
     const draggedId = event.dataTransfer.getData("application/x-project-id");
     if (!draggedId || draggedId === project.id) return;
     event.preventDefault();
-    const position = event.clientY < event.currentTarget.getBoundingClientRect().top + event.currentTarget.getBoundingClientRect().height / 2 ? "before" : "after";
-    const ordered = activeProjects.filter((item) => item.id !== draggedId);
+    const rect = event.currentTarget.getBoundingClientRect();
+    const relativeY = (event.clientY - rect.top) / rect.height;
+    const position = relativeY < 0.32 ? "before" : relativeY > 0.68 ? "after" : "inside";
+    if (position === "inside") {
+      setActiveProjectDrop(null); setDraggingProjectId(null); setActiveDropZone(null);
+      moveProjectMutation.mutate({ id: draggedId, parentId: project.id });
+      return;
+    }
+    const siblings = activeProjects.filter((item) => item.parentId === project.parentId);
+    const ordered = siblings.filter((item) => item.id !== draggedId);
     const index = ordered.findIndex((item) => item.id === project.id);
     const beforeId = position === "before" ? project.id : ordered[index + 1]?.id ?? null;
     const afterId = position === "before" ? ordered[index - 1]?.id ?? null : project.id;
     setActiveProjectDrop(null);
     setDraggingProjectId(null);
     setActiveDropZone(null);
-    reorderProjectMutation.mutate({ id: draggedId, beforeId, afterId });
+    void api.moveProject(draggedId, project.parentId).then(() => reorderProjectMutation.mutate({ id: draggedId, beforeId, afterId }));
   };
   const dropTaskOnCalendarDate = (date: string) => (event: DragEvent<HTMLElement>) => {
     const taskId = event.dataTransfer.getData("text/task-id");
@@ -1053,6 +1081,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   }, [allTasks, targetProjectId]);
   const allProjects = projects.data ?? Object.freeze([]);
   const activeProjects = allProjects.filter((project) => !project.archived);
+  const navigationProjects = projectTreeOrder(activeProjects);
   const allSections = sections.data ?? Object.freeze([]);
   const selectedDetailsTask = detailsTaskId === null ? null : findTaskNode(allTasks, detailsTaskId);
   const selectedDetailsProject = detailProjectId === null
@@ -1277,7 +1306,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
         <a className="nav-button nav-link-button" href="/archived-projects"><Archive size={16} aria-hidden="true" /> Archived projects</a>
         <div className="sidebar-group">
           <h2>My Projects</h2>
-          {activeProjects.map((project) =>
+          {navigationProjects.map((project) =>
             editProjectId === project.id ? (
               <form key={project.id} className="project-edit-form" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setEditProjectId(null); setEditProjectTitle(""); } }} onSubmit={submitProjectEdit(project)}>
                 <label htmlFor={`project-edit-${project.id}`}>Project title</label>
@@ -1299,7 +1328,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
                 </button>
               </form>
             ) : (
-              <div key={project.id} className={clsx("project-nav-row", draggingProjectId === project.id && "project-dragging", activeProjectDrop?.id === project.id && `project-drop-${activeProjectDrop.position}`)} draggable onDragStart={(event) => { setActiveDropZone(null); setActiveProjectDrop(null); setDraggingProjectId(project.id); event.dataTransfer.setData("application/x-project-id", project.id); event.dataTransfer.effectAllowed = "move"; }} onDragEnd={() => { setDraggingProjectId(null); setActiveProjectDrop(null); setActiveDropZone(null); }} onDragOver={markProjectDrop(project)} onDragLeave={() => setActiveProjectDrop(null)} onDrop={dropProject(project)}>
+              <div key={project.id} data-project-id={project.id} style={{ paddingInlineStart: `${Math.min(projectDepth(activeProjects, project), 8) * 18}px` }} className={clsx("project-nav-row", draggingProjectId === project.id && "project-dragging", activeProjectDrop?.id === project.id && `project-drop-${activeProjectDrop.position}`)} draggable onDragStart={(event) => { setActiveDropZone(null); setActiveProjectDrop(null); setDraggingProjectId(project.id); event.dataTransfer.setData("application/x-project-id", project.id); event.dataTransfer.effectAllowed = "move"; }} onDragEnd={() => { setDraggingProjectId(null); setActiveProjectDrop(null); setActiveDropZone(null); }} onDragOver={markProjectDrop(project)} onDragLeave={() => setActiveProjectDrop(null)} onDrop={dropProject(project)}>
                 <button
                   type="button"
                   className={clsx(
@@ -1322,6 +1351,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
                 <details className="project-menu" open={openProjectMenuId === project.id}>
                   <summary aria-label={`Project menu ${project.title}`} onClick={(event) => { event.preventDefault(); setOpenProjectMenuId((current) => current === project.id ? null : project.id); }}><MoreHorizontal size={17} aria-hidden="true" /></summary>
                   <div className="project-menu-items">
+                    <button type="button" onClick={() => { setOpenProjectMenuId(null); setNewProjectParentId(project.id); setProjectTitle(""); setAddingProject(true); }}>＋ Add subproject</button>
                     <button type="button" onClick={() => { setOpenProjectMenuId(null); startProjectEdit(project); }}><Edit3 size={14} aria-hidden="true" /> Edit</button>
                     <button type="button" onClick={() => { setOpenProjectMenuId(null); duplicateProjectMutation.mutate(project.id); }}><Copy size={14} aria-hidden="true" /> Duplicate</button>
                     <button type="button" onClick={() => { setOpenProjectMenuId(null); archiveProjectMutation.mutate({ id: project.id, archived: true }); if (targetProjectId === project.id) { setTargetProjectId(null); setTargetSectionId(null); } }}><Archive size={14} aria-hidden="true" /> Archive</button>
@@ -1334,9 +1364,10 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
         </div>
         <div className="sidebar-create-block">
           {addingProject ? <form className="inline-create-form" onSubmit={submitProject} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); cancelProjectCreate(); } }}>
+            {newProjectParentId !== null ? <p>Subproject of {activeProjects.find((project) => project.id === newProjectParentId)?.title}</p> : null}
             <label htmlFor="project-title">Title</label><input ref={projectCreateInputRef} id="project-title" aria-label="Project title" value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} />
             <div><button type="submit" className="btn-primary">Save</button><button type="button" onClick={cancelProjectCreate}>Cancel</button></div>
-          </form> : <button type="button" className="add-project-trigger" onClick={() => { setProjectTitle(""); setAddingProject(true); }}><Plus size={16} aria-hidden="true" />Add project</button>}
+          </form> : <button type="button" className="add-project-trigger" onClick={() => { setNewProjectParentId(null); setProjectTitle(""); setAddingProject(true); }}><Plus size={16} aria-hidden="true" />Add project</button>}
         </div>
       </aside>
 

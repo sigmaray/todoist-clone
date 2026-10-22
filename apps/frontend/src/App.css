@@ -961,6 +961,7 @@ body {
 .project-nav-row.project-drop-before::after, .project-nav-row.project-drop-after::after,
 .section-header.section-drop-before::after, .section-header.section-drop-after::after { content: ""; position: absolute; z-index: 6; left: 0; width: 10px; height: 10px; border: 2px solid #d33f2f; border-radius: 50%; background: #fff; box-shadow: 0 0 0 3px rgb(211 63 47 / 0.12); pointer-events: none; }
 .project-nav-row.project-drop-before::before, .section-header.section-drop-before::before { top: -1px; }
+.project-nav-row.project-drop-inside { background: #ffe8e5; border-radius: 6px; }
 .project-nav-row.project-drop-before::after, .section-header.section-drop-before::after { top: -5px; }
 .project-nav-row.project-drop-after::before, .section-header.section-drop-after::before { bottom: -1px; }
 .project-nav-row.project-drop-after::after, .section-header.section-drop-after::after { bottom: -5px; }

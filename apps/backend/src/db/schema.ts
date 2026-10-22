@@ -19,6 +19,7 @@ export const projects = pgTable("projects", {
   title: text("title").notNull(),
   description: text("description").notNull().default(""),
   archived: boolean("archived").notNull().default(false),
+  parentId: text("parent_id"),
   lexicalOrder: text("lexical_order").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()

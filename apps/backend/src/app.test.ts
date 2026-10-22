@@ -239,6 +239,26 @@ describe("PATCH /projects/:id/order", () => {
   });
 });
 
+describe("project hierarchy", () => {
+  it("creates subprojects, moves projects across levels, and rejects cycles", async () => {
+    const agent = request(createTestServer());
+    const root = (await agent.post("/projects").send({ title: "Root" }).expect(201)).body.project;
+    const child = (await agent.post("/projects").send({ title: "Child", parentId: root.id }).expect(201)).body.project;
+    const secondChild = (await agent.post("/projects").send({ title: "Second child", parentId: root.id }).expect(201)).body.project;
+    const grandchild = (await agent.post("/projects").send({ title: "Grandchild", parentId: child.id }).expect(201)).body.project;
+    expect(child.parentId).toBe(root.id);
+    await agent.patch(`/projects/${secondChild.id}/order`).send({ beforeId: child.id, afterId: null }).expect(200);
+    const orderedChildren = (await agent.get("/projects").expect(200)).body.projects.filter((project: { parentId: string | null }) => project.parentId === root.id).sort((left: { lexicalOrder: string }, right: { lexicalOrder: string }) => left.lexicalOrder.localeCompare(right.lexicalOrder));
+    expect(orderedChildren.map((project: { id: string }) => project.id)).toEqual([secondChild.id, child.id]);
+    await agent.patch(`/projects/${grandchild.id}/parent`).send({ parentId: null }).expect(200);
+    await agent.patch(`/projects/${root.id}/parent`).send({ parentId: child.id }).expect(404);
+    await agent.delete(`/projects/${root.id}`).expect(200);
+    const listed = await agent.get("/projects").expect(200);
+    expect(listed.body.projects.find((project: { id: string }) => project.id === grandchild.id).parentId).toBeNull();
+    expect(listed.body.projects.find((project: { id: string }) => project.id === child.id).parentId).toBeNull();
+  });
+});
+
 describe("PATCH /sections/:id/order", () => {
   it("persists the requested section order within its scope", async () => {
     const agent = request(createTestServer());
