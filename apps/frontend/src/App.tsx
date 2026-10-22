@@ -3,6 +3,7 @@ import type { DragEndEvent } from "@dnd-kit/core";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { FloatingFocusManager, FloatingOverlay, useFloating } from "@floating-ui/react";
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { BrowserRouter, Link, useLocation, useNavigate } from "react-router-dom";
 import {
   computeDropPlacement,
   computeIndentPlacement,
@@ -12,8 +13,8 @@ import {
 import type { Project, ProjectId, Section, SectionId, Task, TaskId, TaskNode } from "@todoist-clone/domain";
 import clsx from "clsx";
 import { Archive, CalendarDays, ClipboardCopy, Code2, Copy, Database, Download, Edit3, Eye, Inbox, KeyRound, MoreHorizontal, Menu, Plus, Search, Settings, Tag, Trash2, X } from "lucide-react";
-import type { DragEvent, FormEvent, KeyboardEvent, ReactElement } from "react";
-import { useEffect, useRef, useState } from "react";
+import type { DragEvent, FormEvent, KeyboardEvent, ReactElement, UIEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import "./vendor/bootstrap.min.css";
 import { createTaskApi, createToolsApi } from "./api";
@@ -511,8 +512,24 @@ const downloadBlob = (blob: Blob, filename: string) => {
   URL.revokeObjectURL(url);
 };
 
+let rememberedSidebarScrollTop = 0;
+
+const useSidebarScrollPosition = () => {
+  const sidebarRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    if (sidebarRef.current !== null) sidebarRef.current.scrollTop = rememberedSidebarScrollTop;
+  }, []);
+  const rememberScroll = (event: UIEvent<HTMLElement>) => {
+    rememberedSidebarScrollTop = event.currentTarget.scrollTop;
+  };
+  return Object.freeze({ ref: sidebarRef, onScroll: rememberScroll });
+};
+
 export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
-  const [currentPath, setCurrentPath] = useState(window.location.pathname);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const currentPath = location.pathname;
+  const sidebarScroll = useSidebarScrollPosition();
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [dateView, setDateView] = useState<"list" | "calendar">("list");
   const [calendarMonth, setCalendarMonth] = useState(() => new Date().toISOString().slice(0, 7));
@@ -579,7 +596,6 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  useEffect(() => { const syncPath = () => setCurrentPath(window.location.pathname); window.addEventListener("popstate", syncPath); return () => window.removeEventListener("popstate", syncPath); }, []);
   useEffect(() => { if (addingProject) projectCreateInputRef.current?.focus(); }, [addingProject]);
   useEffect(() => { if (addingSection) sectionCreateInputRef.current?.focus(); }, [addingSection]);
   useEffect(() => {
@@ -660,8 +676,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
       setNewProjectParentId(null);
       setTargetProjectId(project.id);
       setTargetSectionId(null);
-      window.history.pushState({}, "", `/?project=${encodeURIComponent(project.id)}`);
-      setCurrentPath("/");
+      navigate(`/?project=${encodeURIComponent(project.id)}`);
       queryClient.setQueryData(projectQueryKey, (current: ReadonlyArray<Project> | undefined) => appendById(current, project));
     }
   });
@@ -690,8 +705,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     onSuccess: async (project) => {
       setTargetProjectId(project.id);
       setTargetSectionId(null);
-      window.history.pushState({}, "", `/?project=${encodeURIComponent(project.id)}`);
-      setCurrentPath("/");
+      navigate(`/?project=${encodeURIComponent(project.id)}`);
       queryClient.setQueryData(projectQueryKey, (current: ReadonlyArray<Project> | undefined) => appendById(current, project));
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: projectQueryKey }),
@@ -1294,7 +1308,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     <main className="shell app-layout">
       <button type="button" className="mobile-menu-toggle" aria-label="Open navigation" aria-expanded={mobileSidebarOpen} onClick={() => setMobileSidebarOpen(true)}><Menu size={23} aria-hidden="true" /></button>
       {mobileSidebarOpen ? <button type="button" className="mobile-sidebar-backdrop" aria-label="Close navigation" onClick={() => setMobileSidebarOpen(false)} /> : null}
-      <aside className={clsx("sidebar card shadow-sm", mobileSidebarOpen && "mobile-sidebar-open")} aria-label="Navigation">
+      <aside className={clsx("sidebar card shadow-sm", mobileSidebarOpen && "mobile-sidebar-open")} aria-label="Navigation" ref={sidebarScroll.ref} onScroll={sidebarScroll.onScroll}>
         <button type="button" className="mobile-sidebar-close" aria-label="Close navigation" onClick={() => setMobileSidebarOpen(false)}><X size={21} aria-hidden="true" /></button>
         <div className="sidebar-brand">
           <span className="brand-mark">T</span>
@@ -1306,7 +1320,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
           type="button"
           className={["nav-button", pageMode === "tasks" && targetProjectId === null && targetSectionId === null ? "active" : ""].filter(Boolean).join(" ")}
           onClick={() => {
-            window.history.pushState({}, "", "/"); setCurrentPath("/");
+            navigate("/");
             setMobileSidebarOpen(false);
             setTargetProjectId(null);
             setTargetSectionId(null);
@@ -1319,20 +1333,20 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
           <Inbox size={16} aria-hidden="true" />
           Inbox
         </button>
-        <a className={clsx("nav-button nav-link-button", pageMode === "dates" && "active")} href="/dates"><CalendarDays size={16} aria-hidden="true" />Dates</a>
-        <a className={clsx("nav-button nav-link-button", pageMode === "labels" && "active")} href="/labels"><Tag size={16} aria-hidden="true" />Labels</a>
-        <a className={clsx("nav-button nav-link-button", pageMode === "export" && "active")} href="/export"><Download size={16} aria-hidden="true" />Export</a>
+        <Link className={clsx("nav-button nav-link-button", pageMode === "dates" && "active")} to="/dates"><CalendarDays size={16} aria-hidden="true" />Dates</Link>
+        <Link className={clsx("nav-button nav-link-button", pageMode === "labels" && "active")} to="/labels"><Tag size={16} aria-hidden="true" />Labels</Link>
+        <Link className={clsx("nav-button nav-link-button", pageMode === "export" && "active")} to="/export"><Download size={16} aria-hidden="true" />Export</Link>
         {toolsEnabled ? (
-          <a className="nav-button nav-link-button" href="/tools">
+          <Link className="nav-button nav-link-button" to="/tools">
             <Code2 size={16} aria-hidden="true" />
             Tools
-          </a>
+          </Link>
         ) : null}
-        <a className="nav-button nav-link-button" href="/settings">
+        <Link className="nav-button nav-link-button" to="/settings">
           <Settings size={16} aria-hidden="true" />
           Settings
-        </a>
-        <a className="nav-button nav-link-button" href="/archived-projects"><Archive size={16} aria-hidden="true" /> Archived projects</a>
+        </Link>
+        <Link className="nav-button nav-link-button" to="/archived-projects"><Archive size={16} aria-hidden="true" /> Archived projects</Link>
         <div className="sidebar-group">
           <h2>My Projects</h2>
           {navigationProjects.map((project) =>
@@ -1366,7 +1380,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
                     activeDropZone === projectPlacement(project.id) && "drop-active",
                   )}
                   onClick={() => {
-                    window.history.pushState({}, "", `/?project=${encodeURIComponent(project.id)}`); setCurrentPath("/");
+                    navigate(`/?project=${encodeURIComponent(project.id)}`);
                     setMobileSidebarOpen(false);
                     setTargetProjectId(project.id);
                     setTargetSectionId(null);
@@ -1418,7 +1432,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
         {pageMode === "dates" || pageMode === "labels" ? (
           <section className="drop-zone task-filter-page" aria-label={`${viewTitle} tasks`}>
             {pageMode === "dates" ? <div className="date-view-switch" aria-label="Date view"><button type="button" aria-pressed={dateView === "list"} onClick={() => setDateView("list")}>List</button><button type="button" aria-pressed={dateView === "calendar"} onClick={() => setDateView("calendar")}>Calendar</button></div> : null}
-            {pageMode === "labels" ? <nav className="label-filter-list" aria-label="Filter by label"><a className={!selectedLabel ? "active" : ""} href="/labels">All labels</a>{Array.from(new Set(flatTasks.flatMap((task) => task.labels))).sort().map((label) => <a key={label} className={selectedLabel === label ? "active" : ""} href={`/labels?label=${encodeURIComponent(label)}`}>{label}</a>)}</nav> : null}
+            {pageMode === "labels" ? <nav className="label-filter-list" aria-label="Filter by label"><Link className={!selectedLabel ? "active" : ""} to="/labels">All labels</Link>{Array.from(new Set(flatTasks.flatMap((task) => task.labels))).sort().map((label) => <Link key={label} className={selectedLabel === label ? "active" : ""} to={`/labels?label=${encodeURIComponent(label)}`}>{label}</Link>)}</nav> : null}
             {pageMode === "dates" && dateView === "calendar" ? <><div className="calendar-month-control"><button type="button" aria-label="Previous month" onClick={() => setCalendarMonth((month) => { const date = new Date(`${month}-01T00:00:00Z`); date.setUTCMonth(date.getUTCMonth() - 1); return date.toISOString().slice(0, 7); })}>‹</button><label>Month<input aria-label="Calendar month" type="month" value={calendarMonth} onChange={(event) => setCalendarMonth(event.target.value)} /></label><button type="button" aria-label="Next month" onClick={() => setCalendarMonth((month) => { const date = new Date(`${month}-01T00:00:00Z`); date.setUTCMonth(date.getUTCMonth() + 1); return date.toISOString().slice(0, 7); })}>›</button></div><div className="dates-calendar" aria-label="Calendar view">{Array.from({ length: new Date(Number(calendarMonth.slice(0, 4)), Number(calendarMonth.slice(5, 7)), 0).getDate() }, (_, index) => index + 1).map((day) => { const date = `${calendarMonth}-${String(day).padStart(2, "0")}`; const matching = viewTasks.filter((task) => task.dueDate === date); return <section key={day} className={clsx("dates-calendar-day", activeCalendarDate === date && "calendar-drop-active")} aria-label={`Tasks for ${date}`} onDragOver={markCalendarDate(date)} onDragLeave={() => setActiveCalendarDate(null)} onDrop={dropTaskOnCalendarDate(date)}><h2>{day}</h2>{matching.map((task) => <button type="button" key={task.id} draggable onDragStart={(event) => { setDraggingTaskId(task.id); event.dataTransfer.setData("text/task-id", task.id); event.dataTransfer.effectAllowed = "move"; }} onDragEnd={() => { setDraggingTaskId(null); setActiveCalendarDate(null); }} onClick={() => { const node = findTaskNode(allTasks, task.id); if (node) openDetails(node); }}>{task.title}</button>)}</section>; })}</div></> : viewTasks.length > 0 ? renderTaskNodes(viewTasks, taskActions) : <p className="empty">{pageMode === "dates" ? "No dated tasks yet." : "No tasks with this label."}</p>}
           </section>
         ) : pageMode === "export" ? (
@@ -1682,9 +1696,11 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
 };
 
 export const ToolsPage = ({ api, navigationApi }: Readonly<{ api: ToolsApi; navigationApi?: ApplicationApi }>) => {
+  const navigate = useNavigate();
+  const sidebarScroll = useSidebarScrollPosition();
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [selectedTable, setSelectedTable] = useState("");
-  useEffect(() => { const openQuickAdd = (event: globalThis.KeyboardEvent) => { const target = event.target; const typing = target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)); if (!typing && !event.ctrlKey && !event.metaKey && !event.altKey && ["q", "й"].includes(event.key.toLocaleLowerCase())) window.location.href = "/?addTask=1"; }; window.addEventListener("keydown", openQuickAdd); return () => window.removeEventListener("keydown", openQuickAdd); }, []);
+  useEffect(() => { const openQuickAdd = (event: globalThis.KeyboardEvent) => { const target = event.target; const typing = target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)); if (!typing && !event.ctrlKey && !event.metaKey && !event.altKey && ["q", "й"].includes(event.key.toLocaleLowerCase())) navigate("/?addTask=1"); }; window.addEventListener("keydown", openQuickAdd); return () => window.removeEventListener("keydown", openQuickAdd); }, []);
   const [projectTitle, setProjectTitle] = useState("");
   const [sql, setSql] = useState("SELECT * FROM tasks ORDER BY lexical_order;");
   const [result, setResult] = useState<unknown>(Object.freeze({ ready: true }));
@@ -1726,15 +1742,15 @@ export const ToolsPage = ({ api, navigationApi }: Readonly<{ api: ToolsApi; navi
       <main className="shell app-layout">
         <button type="button" className="mobile-menu-toggle" aria-label="Open navigation" aria-expanded={mobileSidebarOpen} onClick={() => setMobileSidebarOpen(true)}><Menu size={23} aria-hidden="true" /></button>
         {mobileSidebarOpen ? <button type="button" className="mobile-sidebar-backdrop" aria-label="Close navigation" onClick={() => setMobileSidebarOpen(false)} /> : null}
-        <aside className={clsx("sidebar card shadow-sm", mobileSidebarOpen && "mobile-sidebar-open")} aria-label="Navigation"><button type="button" className="mobile-sidebar-close" aria-label="Close navigation" onClick={() => setMobileSidebarOpen(false)}><X size={21} aria-hidden="true" /></button>
+        <aside className={clsx("sidebar card shadow-sm", mobileSidebarOpen && "mobile-sidebar-open")} aria-label="Navigation" ref={sidebarScroll.ref} onScroll={sidebarScroll.onScroll}><button type="button" className="mobile-sidebar-close" aria-label="Close navigation" onClick={() => setMobileSidebarOpen(false)}><X size={21} aria-hidden="true" /></button>
           <div className="sidebar-brand">
             <span className="brand-mark">T</span>
             <strong>Todoist Clone</strong>
           </div>
-          <a className="nav-button nav-link-button" href="/">
+          <Link className="nav-button nav-link-button" to="/">
             <Inbox size={16} aria-hidden="true" />
             Inbox
-          </a>
+          </Link>
         </aside>
         <section className="workspace card shadow-sm" aria-label="Developer tools disabled">
           <h1>Not found</h1>
@@ -1750,30 +1766,30 @@ export const ToolsPage = ({ api, navigationApi }: Readonly<{ api: ToolsApi; navi
     <main className="shell app-layout">
       <button type="button" className="mobile-menu-toggle" aria-label="Open navigation" aria-expanded={mobileSidebarOpen} onClick={() => setMobileSidebarOpen(true)}><Menu size={23} aria-hidden="true" /></button>
       {mobileSidebarOpen ? <button type="button" className="mobile-sidebar-backdrop" aria-label="Close navigation" onClick={() => setMobileSidebarOpen(false)} /> : null}
-      <aside className={clsx("sidebar card shadow-sm", mobileSidebarOpen && "mobile-sidebar-open")} aria-label="Navigation"><button type="button" className="mobile-sidebar-close" aria-label="Close navigation" onClick={() => setMobileSidebarOpen(false)}><X size={21} aria-hidden="true" /></button>
+      <aside className={clsx("sidebar card shadow-sm", mobileSidebarOpen && "mobile-sidebar-open")} aria-label="Navigation" ref={sidebarScroll.ref} onScroll={sidebarScroll.onScroll}><button type="button" className="mobile-sidebar-close" aria-label="Close navigation" onClick={() => setMobileSidebarOpen(false)}><X size={21} aria-hidden="true" /></button>
         <div className="sidebar-brand">
           <span className="brand-mark">T</span>
           <strong>Todoist Clone</strong>
         </div>
-        <SearchPalette tasks={flattenTaskNodes(taskTree.data ?? Object.freeze([]))} projects={projects.data ?? Object.freeze([])} sections={navigationSections.data ?? Object.freeze([])} onTaskSelect={(task) => { window.location.href = `/?task=${encodeURIComponent(task.id)}`; }} />
-        <a className="nav-button add-task-nav-button" href="/?addTask=1"><Plus size={17} aria-hidden="true" />Add task <kbd>Q</kbd></a>
-        <a className="nav-button nav-link-button" href="/">
+        <SearchPalette tasks={flattenTaskNodes(taskTree.data ?? Object.freeze([]))} projects={projects.data ?? Object.freeze([])} sections={navigationSections.data ?? Object.freeze([])} onTaskSelect={(task) => { navigate(`/?task=${encodeURIComponent(task.id)}`); }} />
+        <Link className="nav-button add-task-nav-button" to="/?addTask=1"><Plus size={17} aria-hidden="true" />Add task <kbd>Q</kbd></Link>
+        <Link className="nav-button nav-link-button" to="/">
           <Inbox size={16} aria-hidden="true" />
           Inbox
-        </a>
-        <a className="nav-button nav-link-button" href="/dates"><CalendarDays size={16} aria-hidden="true" />Dates</a>
-        <a className="nav-button nav-link-button" href="/labels"><Tag size={16} aria-hidden="true" />Labels</a>
-        <a className="nav-button nav-link-button" href="/export"><Download size={16} aria-hidden="true" />Export</a>
-        <a className="nav-button nav-link-button active" href="/tools">
+        </Link>
+        <Link className="nav-button nav-link-button" to="/dates"><CalendarDays size={16} aria-hidden="true" />Dates</Link>
+        <Link className="nav-button nav-link-button" to="/labels"><Tag size={16} aria-hidden="true" />Labels</Link>
+        <Link className="nav-button nav-link-button" to="/export"><Download size={16} aria-hidden="true" />Export</Link>
+        <Link className="nav-button nav-link-button active" to="/tools">
           <Code2 size={16} aria-hidden="true" />
           Tools
-        </a>
-        <a className="nav-button nav-link-button" href="/settings">
+        </Link>
+        <Link className="nav-button nav-link-button" to="/settings">
           <Settings size={16} aria-hidden="true" />
           Settings
-        </a>
-        <a className="nav-button nav-link-button" href="/archived-projects"><Archive size={16} aria-hidden="true" /> Archived projects</a>
-        <div className="sidebar-group"><h2>My Projects</h2>{(projects.data ?? []).filter((project) => !project.archived).map((project) => <a className="nav-button nav-link-button project-tool-link" key={project.id} title={project.title} href={`/?project=${encodeURIComponent(project.id)}`}># <span>{project.title}</span></a>)}</div>
+        </Link>
+        <Link className="nav-button nav-link-button" to="/archived-projects"><Archive size={16} aria-hidden="true" /> Archived projects</Link>
+        <div className="sidebar-group"><h2>My Projects</h2>{(projects.data ?? []).filter((project) => !project.archived).map((project) => <Link className="nav-button nav-link-button project-tool-link" key={project.id} title={project.title} to={`/?project=${encodeURIComponent(project.id)}`}><span>{project.title}</span></Link>)}</div>
         {navigationApi ? <div className="card bg-light border p-3 sidebar-create-block"><form className="compact-form m-0" onSubmit={async (event) => { event.preventDefault(); const nextTitle = projectTitle.trim(); if (!nextTitle) return; await navigationApi.createProject(nextTitle); setProjectTitle(""); await queryClient.invalidateQueries({ queryKey: projectQueryKey }); }}><label htmlFor="tools-project-title">Project title</label><input id="tools-project-title" value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} /><button type="submit"><Plus size={16} aria-hidden="true" />Add project</button></form></div> : null}
       </aside>
       <section className="workspace card shadow-sm tools-panel" aria-label="Database tools">
@@ -1832,6 +1848,8 @@ export const ToolsPage = ({ api, navigationApi }: Readonly<{ api: ToolsApi; navi
 };
 
 export const SettingsPage = ({ api }: Readonly<{ api: ApplicationApi }>) => {
+  const navigate = useNavigate();
+  const sidebarScroll = useSidebarScrollPosition();
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const queryClient = useQueryClient();
   const [navigationProjectTitle, setNavigationProjectTitle] = useState("");
@@ -1845,7 +1863,7 @@ export const SettingsPage = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     const openQuickAdd = (event: globalThis.KeyboardEvent) => {
       const target = event.target;
       const typing = target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
-      if (!typing && !event.ctrlKey && !event.metaKey && !event.altKey && ["q", "й"].includes(event.key.toLocaleLowerCase())) window.location.href = "/?addTask=1";
+      if (!typing && !event.ctrlKey && !event.metaKey && !event.altKey && ["q", "й"].includes(event.key.toLocaleLowerCase())) navigate("/?addTask=1");
     };
     window.addEventListener("keydown", openQuickAdd);
     return () => window.removeEventListener("keydown", openQuickAdd);
@@ -1880,21 +1898,21 @@ export const SettingsPage = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     <main className="shell app-layout">
       <button type="button" className="mobile-menu-toggle" aria-label="Open navigation" aria-expanded={mobileSidebarOpen} onClick={() => setMobileSidebarOpen(true)}><Menu size={23} aria-hidden="true" /></button>
       {mobileSidebarOpen ? <button type="button" className="mobile-sidebar-backdrop" aria-label="Close navigation" onClick={() => setMobileSidebarOpen(false)} /> : null}
-      <aside className={clsx("sidebar card shadow-sm", mobileSidebarOpen && "mobile-sidebar-open")} aria-label="Navigation"><button type="button" className="mobile-sidebar-close" aria-label="Close navigation" onClick={() => setMobileSidebarOpen(false)}><X size={21} aria-hidden="true" /></button>
+      <aside className={clsx("sidebar card shadow-sm", mobileSidebarOpen && "mobile-sidebar-open")} aria-label="Navigation" ref={sidebarScroll.ref} onScroll={sidebarScroll.onScroll}><button type="button" className="mobile-sidebar-close" aria-label="Close navigation" onClick={() => setMobileSidebarOpen(false)}><X size={21} aria-hidden="true" /></button>
         <div className="sidebar-brand">
           <span className="brand-mark">T</span>
           <strong>Todoist Clone</strong>
         </div>
-        <SearchPalette tasks={flattenTaskNodes(tasks.data ?? Object.freeze([]))} projects={projects.data ?? Object.freeze([])} sections={sections.data ?? Object.freeze([])} onTaskSelect={(task) => { window.location.href = `/?task=${encodeURIComponent(task.id)}`; }} />
-        <a className="nav-button add-task-nav-button" href="/?addTask=1"><Plus size={17} aria-hidden="true" />Add task <kbd>Q</kbd></a>
-        <a className="nav-button nav-link-button" href="/"><Inbox size={16} aria-hidden="true" />Inbox</a>
-        <a className="nav-button nav-link-button" href="/dates"><CalendarDays size={16} aria-hidden="true" />Dates</a>
-        <a className="nav-button nav-link-button" href="/labels"><Tag size={16} aria-hidden="true" />Labels</a>
-        <a className="nav-button nav-link-button" href="/export"><Download size={16} aria-hidden="true" />Export</a>
-        {toolsEnabled ? <a className="nav-button nav-link-button" href="/tools"><Code2 size={16} aria-hidden="true" />Tools</a> : null}
-        <a className="nav-button nav-link-button active" href="/settings"><Settings size={16} aria-hidden="true" />Settings</a>
-        <a className="nav-button nav-link-button" href="/archived-projects"><Archive size={16} aria-hidden="true" />Archived projects</a>
-        <div className="sidebar-group"><h2>My Projects</h2>{(projects.data ?? []).filter((project) => !project.archived).map((project) => <a className="nav-button nav-link-button project-tool-link" key={project.id} href={`/?project=${encodeURIComponent(project.id)}`}># <span>{project.title}</span></a>)}</div>
+        <SearchPalette tasks={flattenTaskNodes(tasks.data ?? Object.freeze([]))} projects={projects.data ?? Object.freeze([])} sections={sections.data ?? Object.freeze([])} onTaskSelect={(task) => { navigate(`/?task=${encodeURIComponent(task.id)}`); }} />
+        <Link className="nav-button add-task-nav-button" to="/?addTask=1"><Plus size={17} aria-hidden="true" />Add task <kbd>Q</kbd></Link>
+        <Link className="nav-button nav-link-button" to="/"><Inbox size={16} aria-hidden="true" />Inbox</Link>
+        <Link className="nav-button nav-link-button" to="/dates"><CalendarDays size={16} aria-hidden="true" />Dates</Link>
+        <Link className="nav-button nav-link-button" to="/labels"><Tag size={16} aria-hidden="true" />Labels</Link>
+        <Link className="nav-button nav-link-button" to="/export"><Download size={16} aria-hidden="true" />Export</Link>
+        {toolsEnabled ? <Link className="nav-button nav-link-button" to="/tools"><Code2 size={16} aria-hidden="true" />Tools</Link> : null}
+        <Link className="nav-button nav-link-button active" to="/settings"><Settings size={16} aria-hidden="true" />Settings</Link>
+        <Link className="nav-button nav-link-button" to="/archived-projects"><Archive size={16} aria-hidden="true" />Archived projects</Link>
+        <div className="sidebar-group"><h2>My Projects</h2>{(projects.data ?? []).filter((project) => !project.archived).map((project) => <Link className="nav-button nav-link-button project-tool-link" key={project.id} to={`/?project=${encodeURIComponent(project.id)}`}><span>{project.title}</span></Link>)}</div>
         <div className="card bg-light border p-3 sidebar-create-block"><form className="compact-form m-0" onSubmit={async (event) => { event.preventDefault(); const value = navigationProjectTitle.trim(); if (!value) return; await api.createProject(value); setNavigationProjectTitle(""); await queryClient.invalidateQueries({ queryKey: projectQueryKey }); }}><label htmlFor="settings-project-title">Project title</label><input id="settings-project-title" value={navigationProjectTitle} onChange={(event) => setNavigationProjectTitle(event.target.value)} /><button type="submit"><Plus size={16} aria-hidden="true" />Add project</button></form></div>
       </aside>
       <section className="workspace card shadow-sm settings-panel" aria-label="Settings">
@@ -1988,10 +2006,14 @@ export const SettingsPage = ({ api }: Readonly<{ api: ApplicationApi }>) => {
 };
 
 export const ArchivedProjectsPage = ({ api }: Readonly<{ api: ApplicationApi }>) => {
+  const navigate = useNavigate();
+  const sidebarScroll = useSidebarScrollPosition();
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const queryClient = useQueryClient();
   const [selectedProjectId, setSelectedProjectId] = useState<ProjectId | null>(null);
+  const [navigationProjectTitle, setNavigationProjectTitle] = useState("");
   const projects = useQuery({ queryKey: projectQueryKey, queryFn: api.listProjects });
+  const sections = useQuery({ queryKey: sectionQueryKey, queryFn: api.listSections });
   const tasks = useQuery({ queryKey: taskQueryKey, queryFn: api.listTasks });
   const archived = (projects.data ?? []).filter((project) => project.archived);
   const restore = async (project: Project) => { await api.archiveProject(project.id, false); await queryClient.invalidateQueries({ queryKey: projectQueryKey }); };
@@ -2007,7 +2029,21 @@ export const ArchivedProjectsPage = ({ api }: Readonly<{ api: ApplicationApi }>)
   return <main className="shell app-layout">
     <button type="button" className="mobile-menu-toggle" aria-label="Open navigation" aria-expanded={mobileSidebarOpen} onClick={() => setMobileSidebarOpen(true)}><Menu size={23} aria-hidden="true" /></button>
     {mobileSidebarOpen ? <button type="button" className="mobile-sidebar-backdrop" aria-label="Close navigation" onClick={() => setMobileSidebarOpen(false)} /> : null}
-    <aside className={clsx("sidebar card shadow-sm", mobileSidebarOpen && "mobile-sidebar-open")} aria-label="Navigation"><button type="button" className="mobile-sidebar-close" aria-label="Close navigation" onClick={() => setMobileSidebarOpen(false)}><X size={21} aria-hidden="true" /></button><div className="sidebar-brand"><span className="brand-mark">T</span><strong>Todoist Clone</strong></div><a className="nav-button nav-link-button" href="/"><Inbox size={16} /> Inbox</a><a className="nav-button nav-link-button" href="/export"><Download size={16} /> Export</a><a className="nav-button nav-link-button active" href="/archived-projects"><Archive size={16} /> Archived projects</a></aside>
+    <aside className={clsx("sidebar card shadow-sm", mobileSidebarOpen && "mobile-sidebar-open")} aria-label="Navigation" ref={sidebarScroll.ref} onScroll={sidebarScroll.onScroll}>
+      <button type="button" className="mobile-sidebar-close" aria-label="Close navigation" onClick={() => setMobileSidebarOpen(false)}><X size={21} aria-hidden="true" /></button>
+      <div className="sidebar-brand"><span className="brand-mark">T</span><strong>Todoist Clone</strong></div>
+      <SearchPalette tasks={flattenTaskNodes(tasks.data ?? Object.freeze([]))} projects={(projects.data ?? []).filter((project) => !project.archived)} sections={sections.data ?? Object.freeze([])} onTaskSelect={(task) => { setMobileSidebarOpen(false); navigate(`/?task=${encodeURIComponent(task.id)}`); }} />
+      <Link className="nav-button add-task-nav-button" to="/?addTask=1"><Plus size={17} aria-hidden="true" />Add task <kbd>Q</kbd></Link>
+      <Link className="nav-button nav-link-button" to="/"><Inbox size={16} aria-hidden="true" />Inbox</Link>
+      <Link className="nav-button nav-link-button" to="/dates"><CalendarDays size={16} aria-hidden="true" />Dates</Link>
+      <Link className="nav-button nav-link-button" to="/labels"><Tag size={16} aria-hidden="true" />Labels</Link>
+      <Link className="nav-button nav-link-button" to="/export"><Download size={16} aria-hidden="true" />Export</Link>
+      {toolsEnabled ? <Link className="nav-button nav-link-button" to="/tools"><Code2 size={16} aria-hidden="true" />Tools</Link> : null}
+      <Link className="nav-button nav-link-button" to="/settings"><Settings size={16} aria-hidden="true" />Settings</Link>
+      <Link className="nav-button nav-link-button active" to="/archived-projects"><Archive size={16} aria-hidden="true" />Archived projects</Link>
+      <div className="sidebar-group"><h2>My Projects</h2>{(projects.data ?? []).filter((project) => !project.archived).map((project) => <Link className="nav-button nav-link-button project-tool-link" key={project.id} title={project.title} to={`/?project=${encodeURIComponent(project.id)}`}><span>{project.title}</span></Link>)}</div>
+      <div className="sidebar-create-block"><form className="compact-form m-0" onSubmit={async (event) => { event.preventDefault(); const title = navigationProjectTitle.trim(); if (!title) return; await api.createProject(title); setNavigationProjectTitle(""); await queryClient.invalidateQueries({ queryKey: projectQueryKey }); }}><label htmlFor="archived-navigation-project-title">Project title</label><input id="archived-navigation-project-title" value={navigationProjectTitle} onChange={(event) => setNavigationProjectTitle(event.target.value)} /><button type="submit"><Plus size={16} aria-hidden="true" />Add project</button></form></div>
+    </aside>
     <section className="workspace card shadow-sm"><h1>Archived projects</h1>
       {archived.length === 0 ? <p className="empty">No archived projects.</p> : archived.map((project) => <article className="archived-project" key={project.id}><strong>{project.title}</strong><div><button type="button" onClick={() => setSelectedProjectId((current) => current === project.id ? null : project.id)}>{selectedProjectId === project.id ? "Hide tasks" : "View tasks"}</button><button type="button" onClick={() => void restore(project)}>Restore</button><button type="button" className="danger" onClick={() => void remove(project)}>Delete</button></div></article>)}
       {selectedProject !== undefined ? <section className="archived-task-view" aria-label={`${selectedProject.title} tasks`}><h2>{selectedProject.title} tasks</h2>{tasks.isLoading ? <p>Loading tasks…</p> : archivedTaskRoots.length === 0 ? <p className="empty">This project has no tasks.</p> : renderTasks(archivedTaskRoots)}</section> : null}
@@ -2055,7 +2091,7 @@ const LoginPage = ({ api }: Readonly<{ api: ApplicationApi }>) => {
 const AppRouter = () => {
   const api = createTaskApi();
   const authStatus = useQuery({ queryKey: authStatusQueryKey, queryFn: api.getAuthStatus });
-  const path = window.location.pathname;
+  const path = useLocation().pathname;
 
   if (authStatus.isLoading) {
     return <main className="auth-loading">Loading…</main>;
@@ -2091,4 +2127,4 @@ export const createQueryClient = () =>
     }
   });
 
-export const App = () => <QueryClientProvider client={createQueryClient()}><AppRouter /></QueryClientProvider>;
+export const App = () => <QueryClientProvider client={createQueryClient()}><BrowserRouter><AppRouter /></BrowserRouter></QueryClientProvider>;
