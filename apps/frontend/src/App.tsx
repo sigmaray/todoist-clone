@@ -115,6 +115,7 @@ const renderTaskNodes = (
                 Title
                 <input
                   aria-label={`Edit ${task.title}`}
+                  autoFocus
                   value={actions.editTitle}
                   onChange={(event) => actions.setEditTitle(event.target.value)}
                 />
@@ -169,6 +170,7 @@ const renderTaskNodes = (
             <label htmlFor={`subtask-${task.id}`}>Subtask for {task.title}</label>
             <input
               id={`subtask-${task.id}`}
+              autoFocus
               value={actions.subtaskTitle}
               onChange={(event) => actions.setSubtaskTitle(event.target.value)}
               placeholder="Add a subtask"
@@ -786,6 +788,14 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
     downloadBlob(await createZipBlob(allMarkdownFiles(allProjects, allSections, allTasks)), "todoist-clonse-markdown.zip");
   };
 
+  const allMarkdown = allMarkdownFiles(allProjects, allSections, allTasks)
+    .map((file) => file.content)
+    .join("\n\n---\n\n");
+
+  const exportMarkdown = () => {
+    downloadBlob(new Blob([allMarkdown], { type: "text/markdown;charset=utf-8" }), "todoist-clonse.md");
+  };
+
   return (
     <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={finishDndDrag}>
     <main className="shell app-layout">
@@ -885,6 +895,16 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
         <button type="button" className="sidebar-export btn btn-success" onClick={exportZip}>
           <Archive size={16} aria-hidden="true" />
           Export all ZIP
+        </button>
+        <button type="button" className="sidebar-export btn btn-outline-success" onClick={exportMarkdown}>
+          Export all markdown
+        </button>
+        <button
+          type="button"
+          className="sidebar-export btn btn-outline-secondary"
+          onClick={() => setMarkdownModal(Object.freeze({ title: "All tasks", markdown: allMarkdown }))}
+        >
+          Preview all markdown
         </button>
       </aside>
 

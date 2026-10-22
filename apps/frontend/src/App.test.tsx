@@ -204,6 +204,7 @@ describe("TaskApp", () => {
 
     await screen.findByText("Plan MVP");
     await userEvent.click(screen.getByRole("button", { name: "Add subtask to Plan MVP" }));
+    expect(screen.getByLabelText("Subtask for Plan MVP")).toHaveFocus();
     await userEvent.type(screen.getByLabelText("Subtask for Plan MVP"), "Write outline");
     await userEvent.click(screen.getByRole("button", { name: "Add subtask" }));
 
@@ -484,6 +485,7 @@ describe("TaskApp", () => {
 
     await screen.findByText("Plan MVP");
     await userEvent.click(screen.getByRole("button", { name: "Edit task Plan MVP" }));
+    expect(screen.getByLabelText("Edit Plan MVP")).toHaveFocus();
     await userEvent.clear(screen.getByLabelText("Edit Plan MVP"));
     await userEvent.type(screen.getByLabelText("Edit Plan MVP"), "Plan MVP carefully");
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -559,6 +561,16 @@ describe("TaskApp", () => {
 
     expect(await screen.findByRole("dialog", { name: "Markdown preview" })).toBeInTheDocument();
     expect(screen.getByText(/- \[x\] Plan MVP \(P1\)/)).toBeInTheDocument();
+  });
+
+  it("previews markdown for all tasks from the sidebar", async () => {
+    renderApp(baseApi(Object.freeze([task({ id: "1", title: "All tasks note" })])));
+
+    await screen.findByText("All tasks note");
+    await userEvent.click(screen.getByRole("button", { name: "Preview all markdown" }));
+
+    expect(await screen.findByRole("dialog", { name: "Markdown preview" })).toBeInTheDocument();
+    expect(screen.getByText(/- \[ \] All tasks note/)).toBeInTheDocument();
   });
 });
 
