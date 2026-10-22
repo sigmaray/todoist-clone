@@ -11,6 +11,11 @@ test("edits task details and copies all Markdown", async ({ context, page }) => 
   await page.getByLabel("Project title").fill(projectTitle);
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("button", { name: projectTitle, exact: true })).toBeVisible();
+  const sectionTitle = unique("Task section");
+  await page.getByRole("button", { name: "Add section" }).click();
+  await page.getByLabel("Section title").fill(sectionTitle);
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("heading", { name: sectionTitle })).toBeVisible();
   const title = unique("Detailed task");
   await page.getByRole("button", { name: "Add task Q" }).click();
   const newTitle = page.getByLabel("New task title");
@@ -85,12 +90,13 @@ test("edits task details and copies all Markdown", async ({ context, page }) => 
   await expect(detailSubtaskTitle).toHaveJSProperty("tagName", "TEXTAREA");
   await detailSubtaskTitle.fill("Nested from details");
   await page.getByLabel("New subtask title").press("Enter");
-  await taskDialog.getByLabel("Project or Inbox").selectOption({ label: projectTitle });
+  await taskDialog.getByLabel("Project, section, or Inbox").selectOption({ label: `${projectTitle} / ${sectionTitle}` });
+  await expect(taskDialog.locator(".task-details-header-path")).toContainText(sectionTitle);
   await expect(taskDialog.getByRole("link", { name: projectTitle, exact: true }).first()).toBeVisible();
   const projectHref = await taskDialog.getByRole("link", { name: projectTitle, exact: true }).first().getAttribute("href");
   if (projectHref === null) throw new Error("Missing project navigation link");
   await page.goto(projectHref);
-  await expect(page.getByRole("button", { name: title, exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: `Section ${sectionTitle}` }).getByRole("button", { name: title, exact: true })).toBeVisible();
   await page.getByRole("button", { name: title, exact: true }).click();
   const reopenedDialog = page.getByRole("dialog", { name: `Task details: ${title}` });
   await expect(reopenedDialog.getByRole("button", { name: "Edit task description" })).toHaveText("Task details saved from the dialog");

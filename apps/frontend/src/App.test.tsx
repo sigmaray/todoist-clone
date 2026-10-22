@@ -197,11 +197,12 @@ describe("TaskApp", () => {
   });
 
   it("shows task location and parent links, and moves tasks between Inbox and projects", async () => {
-    const moveTask = vi.fn(async (id: string, projectId: string | null): Promise<Task> => task({ id, title: "Child task", projectId }));
+    const moveTask = vi.fn(async (id: string, projectId: string | null, sectionId: string | null): Promise<Task> => task({ id, title: "Child task", projectId, sectionId }));
     const parent = task({ id: "parent-1", title: "Parent task", children: Object.freeze([task({ id: "child-1", title: "Child task", parentId: "parent-1" })]) });
     renderApp(Object.freeze({
       ...baseApi(Object.freeze([parent])),
       listProjects: async () => Object.freeze([project({ id: "project-1", title: "Roadmap" })]),
+      listSections: async () => Object.freeze([section({ id: "section-1", title: "Next", projectId: "project-1" })]),
       moveTask
     }));
 
@@ -209,9 +210,14 @@ describe("TaskApp", () => {
     const dialog = screen.getByRole("dialog", { name: "Task details: Child task" });
     expect(within(dialog).getAllByRole("link", { name: "Inbox" })[0]).toHaveAttribute("href", "/");
     expect(within(dialog).getByRole("link", { name: "Parent task" })).toHaveAttribute("href", "/?task=parent-1");
-    await userEvent.selectOptions(within(dialog).getByLabelText("Project or Inbox"), "project:project-1");
+    const locationPicker = within(dialog).getByLabelText("Project, section, or Inbox");
+    await userEvent.selectOptions(locationPicker, "project:project-1");
     await waitFor(() => expect(moveTask).toHaveBeenCalledWith("child-1", "project-1", null, null, null, null));
-    expect(within(dialog).getByLabelText("Project or Inbox")).toHaveValue("project:project-1");
+    expect(locationPicker).toHaveValue("project:project-1");
+    expect(within(dialog).getByRole("option", { name: "Roadmap / Next" })).toBeInTheDocument();
+    await userEvent.selectOptions(locationPicker, "section:section-1");
+    await waitFor(() => expect(moveTask).toHaveBeenCalledWith("child-1", "project-1", "section-1", null, null, null));
+    expect(locationPicker).toHaveValue("section:section-1");
     expect(within(dialog).queryByRole("navigation", { name: "Task location" })).not.toBeInTheDocument();
   });
 

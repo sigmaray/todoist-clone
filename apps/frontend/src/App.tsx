@@ -531,6 +531,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const [detailLabelInput, setDetailLabelInput] = useState("");
   const [detailSaveStatus, setDetailSaveStatus] = useState("");
   const [detailProjectId, setDetailProjectId] = useState<ProjectId | null>(null);
+  const [detailSectionId, setDetailSectionId] = useState<SectionId | null>(null);
   const [editingDetailField, setEditingDetailField] = useState<"title" | "description" | null>(null);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const projectCreateInputRef = useRef<HTMLInputElement>(null);
@@ -1022,6 +1023,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     setDetailLabelInput("");
     setDetailSaveStatus("");
     setDetailProjectId(task.projectId);
+    setDetailSectionId(task.sectionId);
     setEditingDetailField(null);
     setDatePickerOpen(false);
   };
@@ -1597,7 +1599,9 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
               </section>
               </div>
               <aside className="task-details-sidebar">
-                <section><h3>Project</h3><select className="form-select" aria-label="Project or Inbox" value={detailProjectId === null ? "inbox" : `project:${detailProjectId}`} onChange={async (event) => { const projectId = event.target.value === "inbox" ? null : event.target.value.slice("project:".length); setDetailProjectId(projectId); setDetailSaveStatus("Saving…"); try { await api.moveTask(selectedDetailsTask.id, projectId, null, null, null, null); await queryClient.invalidateQueries({ queryKey: taskQueryKey }); setDetailSaveStatus("Saved"); } catch { setDetailProjectId(selectedDetailsTask.projectId); setDetailSaveStatus("Could not save changes"); } }}><option value="inbox">Inbox</option>{activeProjects.map((project) => <option key={project.id} value={`project:${project.id}`}>{project.title}</option>)}</select></section>
+                <section><h3>Project</h3><select className="form-select" aria-label="Project, section, or Inbox" value={detailSectionId === null ? detailProjectId === null ? inboxPlacement : projectPlacement(detailProjectId) : sectionPlacement(detailSectionId)} onChange={async (event) => { const placement = parsePlacement(event.target.value, allSections); setDetailProjectId(placement.projectId); setDetailSectionId(placement.sectionId); setDetailSaveStatus("Saving…"); try { await api.moveTask(selectedDetailsTask.id, placement.projectId, placement.sectionId, null, null, null); await queryClient.invalidateQueries({ queryKey: taskQueryKey }); setDetailSaveStatus("Saved"); } catch { setDetailProjectId(selectedDetailsTask.projectId); setDetailSectionId(selectedDetailsTask.sectionId); setDetailSaveStatus("Could not save changes"); } }}>
+                  {createPlacementOptions(activeProjects, allSections.filter((section) => section.projectId === null || activeProjects.some((project) => project.id === section.projectId))).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select></section>
                 <section><h3>Date</h3>{detailDueDate ? <div className="task-detail-meta-value"><button type="button" className="task-detail-date" onClick={() => setDatePickerOpen(true)} title={detailDueDate}>{new Date(`${detailDueDate}T00:00:00`).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}</button><button type="button" aria-label="Remove date" onClick={async () => { setDetailDueDate(""); await saveTaskDetails({ dueDate: null }); }}>×</button></div> : <button type="button" className="btn-primary" onClick={() => setDatePickerOpen(true)}>＋ Add date</button>}</section>
                 <section><div className="task-detail-label-heading"><h3>Labels</h3><button type="button" aria-label="Add label" onClick={() => setDetailLabelInput(" ")}>＋</button></div><div className="detail-label-chips">{selectedDetailsTask.labels.map((label) => <span className="task-detail-label" key={label}>{label}<button type="button" aria-label={`Remove label ${label}`} onClick={() => { const labels = selectedDetailsTask.labels.filter((item) => item !== label); setDetailLabels(labels.join(", ")); void saveTaskDetails({ labels }); }}>×</button></span>)}</div>{detailLabelInput !== "" ? <><input autoFocus aria-label="Labels" list="task-label-options" value={detailLabelInput.trimStart()} placeholder="Add a label" onChange={(event) => setDetailLabelInput(event.target.value)} onKeyDown={async (event) => { if (event.key === "Escape") setDetailLabelInput(""); if (event.key === "Enter") { event.preventDefault(); const label = detailLabelInput.trim(); if (!label) return; const labels = Array.from(new Set([...selectedDetailsTask.labels, label])); if (await saveTaskDetails({ labels })) setDetailLabelInput(""); } }} /><datalist id="task-label-options">{Array.from(new Set(flatTasks.flatMap((task) => task.labels))).map((label) => <option key={label} value={label} />)}</datalist></> : null}</section>
                 <p className="task-autosave-status" aria-live="polite">{detailSaveStatus}</p>
