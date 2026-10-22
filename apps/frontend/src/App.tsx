@@ -522,6 +522,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const [editTitle, setEditTitle] = useState("");
   const [editPlacement, setEditPlacement] = useState(inboxPlacement);
   const [markdownModal, setMarkdownModal] = useState<Readonly<{ title: string; markdown: string; format?: "markdown" | "json" }> | null>(null);
+  const [scopeExportOpen, setScopeExportOpen] = useState(false);
   const [detailsTaskId, setDetailsTaskId] = useState<TaskId | null>(null);
   const [detailTitle, setDetailTitle] = useState("");
   const [detailDescription, setDetailDescription] = useState("");
@@ -568,10 +569,11 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   }, [openProjectMenuId]);
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape" && scopeExportOpen && markdownModal === null) setScopeExportOpen(false);
       if (event.key === "Escape" && detailsTaskId !== null && editingDetailField === null && !datePickerOpen && detailLabelInput === "") setDetailsTaskId(null);
       const target = event.target;
       const isTyping = target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
-      if (!isTyping && detailsTaskId === null && markdownModal === null && !addTaskOpen && !event.ctrlKey && !event.metaKey && !event.altKey && ["q", "й"].includes(event.key.toLocaleLowerCase())) {
+      if (!isTyping && detailsTaskId === null && markdownModal === null && !scopeExportOpen && !addTaskOpen && !event.ctrlKey && !event.metaKey && !event.altKey && ["q", "й"].includes(event.key.toLocaleLowerCase())) {
         event.preventDefault();
         setAddTaskPlacement(currentPath === "/" ? (targetSectionId === null ? targetProjectId === null ? inboxPlacement : projectPlacement(targetProjectId) : sectionPlacement(targetSectionId)) : inboxPlacement);
         setAddTaskPlacement(currentPath === "/" ? (targetSectionId === null ? targetProjectId === null ? inboxPlacement : projectPlacement(targetProjectId) : sectionPlacement(targetSectionId)) : inboxPlacement);
@@ -580,7 +582,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [detailsTaskId, markdownModal, addTaskOpen, editingDetailField, datePickerOpen, detailLabelInput, targetProjectId, targetSectionId, currentPath]);
+  }, [detailsTaskId, markdownModal, scopeExportOpen, addTaskOpen, editingDetailField, datePickerOpen, detailLabelInput, targetProjectId, targetSectionId, currentPath]);
   const tasks = useQuery({
     queryKey: taskQueryKey,
     queryFn: api.listTasks
@@ -1170,11 +1172,6 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     await queryClient.invalidateQueries({ queryKey: taskQueryKey });
   };
 
-  const copyMarkdown = async () => {
-    await copyText(markdown);
-    setCopyStatus("Markdown copied");
-  };
-
   const finishDndDrag = (_event: DragEndEvent) => {
     setDraggingTaskId(null);
     setActiveDragTarget(null);
@@ -1204,6 +1201,27 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
       inbox: inboxDescriptionQuery.data ?? "",
       projects: allProjects.map((project) => Object.freeze({ id: project.id, description: project.description })),
       tasks: flatTasks.filter((task) => task.description.length > 0).map((task) => Object.freeze({ id: task.id, description: task.description }))
+    })
+  }), null, 2);
+  const scopeProject = targetProjectId === null ? null : allProjects.find((project) => project.id === targetProjectId) ?? null;
+  const scopeSections = allSections.filter((section) => section.projectId === targetProjectId);
+  const scopeTasks = flatTasks.filter((task) => task.projectId === targetProjectId);
+  const scopeTaskTree = filterTaskTree(allTasks, (task) => task.projectId === targetProjectId);
+  const scopeDescription = targetProjectId === null ? inboxDescriptionQuery.data ?? "" : scopeProject?.description ?? "";
+  const scopeJson = JSON.stringify(Object.freeze({
+    schemaVersion: 1,
+    exportedAt: new Date().toISOString(),
+    scope: Object.freeze({ type: targetProjectId === null ? "inbox" : "project", id: targetProjectId, title: targetProjectId === null ? "Inbox" : scopeProject?.title ?? taskTargetLabel }),
+    inbox: targetProjectId === null ? Object.freeze({ description: scopeDescription, sections: scopeSections, tasks: scopeTasks }) : null,
+    project: scopeProject === null ? null : Object.freeze({ ...scopeProject, sections: scopeSections, tasks: scopeTasks }),
+    sections: scopeSections,
+    tasks: scopeTasks,
+    taskTree: scopeTaskTree,
+    dates: scopeTasks.filter((task) => task.dueDate !== null).map((task) => Object.freeze({ taskId: task.id, dueDate: task.dueDate })),
+    comments: scopeTasks.flatMap((task) => task.comments.map((comment) => Object.freeze({ ...comment, taskId: task.id }))),
+    descriptions: Object.freeze({
+      scope: scopeDescription,
+      tasks: scopeTasks.filter((task) => task.description.length > 0).map((task) => Object.freeze({ id: task.id, description: task.description }))
     })
   }), null, 2);
 
@@ -1320,18 +1338,10 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
         <header className="header">
           <p className="eyebrow">Self-hosted MVP</p>
           <h1>{viewTitle}</h1>
-          {pageMode === "tasks" ? <div className="export-actions" aria-label="Markdown export">
-            <button type="button" onClick={copyMarkdown}>
-              <ClipboardCopy size={16} aria-hidden="true" />
-              Copy markdown
-            </button>
-            <button type="button" onClick={() => setMarkdownModal(Object.freeze({ title: taskTargetLabel, markdown }))}>
-              <Database size={16} aria-hidden="true" />
-              Preview markdown
-            </button>
-            {copyStatus.length > 0 ? <span className="muted">{copyStatus}</span> : null}
+          {pageMode === "tasks" ? <div className="task-header-actions">
+            <button type="button" className="scope-export-trigger btn-primary" onClick={() => setScopeExportOpen(true)}><Download size={16} aria-hidden="true" />Export</button>
+            <button type="button" className="btn btn-outline-danger delete-all-tasks-button" disabled={!flatTasks.some((task) => task.parentId === null && task.projectId === targetProjectId)} onClick={() => void deleteAllTasks()}><Trash2 size={15} aria-hidden="true" />Delete all tasks</button>
           </div> : null}
-          {pageMode === "tasks" ? <button type="button" className="btn btn-outline-danger delete-all-tasks-button" disabled={!flatTasks.some((task) => task.parentId === null && task.projectId === targetProjectId)} onClick={() => void deleteAllTasks()}><Trash2 size={15} aria-hidden="true" />Delete all tasks</button> : null}
         </header>
 
 
@@ -1487,7 +1497,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
         )}
       </section>
       {markdownModal !== null ? (
-        <FloatingOverlay className="markdown-modal-backdrop" lockScroll>
+        <FloatingOverlay className={clsx("markdown-modal-backdrop", scopeExportOpen && "scope-preview-backdrop")} lockScroll>
           <FloatingFocusManager context={markdownFloating.context}>
           <section
             ref={markdownFloating.refs.setFloating}
@@ -1513,6 +1523,28 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
           </FloatingFocusManager>
         </FloatingOverlay>
       ) : null}
+      {scopeExportOpen ? <div className="export-options-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setScopeExportOpen(false); }}>
+        <section className="export-options-modal" role="dialog" aria-modal="true" aria-label="Export options" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setScopeExportOpen(false); } }}>
+          <header><div><p className="eyebrow">Export</p><h2>{targetProjectId === null ? "Inbox" : scopeProject?.title ?? taskTargetLabel}</h2></div><button type="button" aria-label="Close export options" onClick={() => setScopeExportOpen(false)}><X size={18} aria-hidden="true" /></button></header>
+          <div className="export-options-formats">
+            <section className="card export-format-card" aria-labelledby="scope-markdown-export-title">
+              <div><h3 id="scope-markdown-export-title">Markdown</h3><p>Readable task list for {targetProjectId === null ? "Inbox" : scopeProject?.title ?? taskTargetLabel}.</p></div>
+              <div className="export-format-actions">
+                <button type="button" onClick={() => setMarkdownModal(Object.freeze({ title: targetProjectId === null ? "Inbox" : taskTargetLabel, markdown, format: "markdown" }))}><Eye size={16} aria-hidden="true" />Preview markdown</button>
+                <button type="button" onClick={async () => { await copyText(markdown); setCopyStatus("Markdown copied"); }}><ClipboardCopy size={16} aria-hidden="true" />Copy markdown</button>
+              </div>
+            </section>
+            <section className="card export-format-card" aria-labelledby="scope-json-export-title">
+              <div><h3 id="scope-json-export-title">JSON</h3><p>Complete structured data with tasks, sections, dates, descriptions, labels, and comments.</p></div>
+              <div className="export-format-actions">
+                <button type="button" onClick={() => setMarkdownModal(Object.freeze({ title: targetProjectId === null ? "Inbox" : taskTargetLabel, markdown: scopeJson, format: "json" }))}><Eye size={16} aria-hidden="true" />Preview JSON</button>
+                <button type="button" onClick={async () => { await copyText(scopeJson); setCopyStatus("JSON copied"); }}><ClipboardCopy size={16} aria-hidden="true" />Copy JSON</button>
+              </div>
+            </section>
+          </div>
+          {copyStatus === "Markdown copied" || copyStatus === "JSON copied" ? <p className="export-copy-status" role="status">{copyStatus}</p> : null}
+        </section>
+      </div> : null}
       {addTaskOpen ? <div className="task-details-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setAddTaskOpen(false); }}>
         <section className="add-task-dialog" role="dialog" aria-modal="true" aria-label="Add task" onKeyDown={(event) => { if (event.key === "Escape" && !addTaskDatePickerOpen) setAddTaskOpen(false); }}>
           <header><h2>Add task</h2><button type="button" aria-label="Close add task" onClick={() => setAddTaskOpen(false)}><X size={18} /></button></header>

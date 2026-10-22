@@ -707,12 +707,53 @@ describe("TaskApp", () => {
 
     await screen.findByText("Plan MVP");
     expect(screen.queryByText("P1")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /^Export$/ }));
+    expect(await screen.findByRole("dialog", { name: "Export options" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Preview markdown" }));
 
     expect(await screen.findByRole("dialog", { name: "Markdown preview" })).toBeInTheDocument();
     expect(screen.getByText(/- \[x\] Plan MVP/)).toBeInTheDocument();
     fireEvent.keyDown(screen.getByRole("dialog", { name: "Markdown preview" }), { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "Markdown preview" })).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Export options" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Close export options" }));
+  });
+
+  it("previews JSON scoped to the currently open project with its complete task data", async () => {
+    window.history.replaceState({}, "", "/?project=project-1");
+    const projectTask = task({
+      id: "project-task",
+      title: "Project task",
+      description: "Detailed project note",
+      projectId: "project-1",
+      sectionId: "section-1",
+      dueDate: "2026-12-04",
+      labels: Object.freeze(["planning"]),
+      comments: Object.freeze([Object.freeze({ id: "project-comment", body: "Project comment", createdAt: "2026-10-22T10:00:00.000Z" })])
+    });
+    const api = Object.freeze({
+      ...baseApi(Object.freeze([task({ id: "inbox-task", title: "Inbox only" }), projectTask])),
+      listProjects: async () => Object.freeze([project({ id: "project-1", title: "Roadmap", description: "Roadmap details" })]),
+      listSections: async () => Object.freeze([section({ id: "section-1", title: "Milestone", projectId: "project-1" })])
+    });
+    renderApp(api);
+
+    await screen.findByText("Project task");
+    await userEvent.click(screen.getByRole("button", { name: /^Export$/ }));
+    expect(await screen.findByRole("dialog", { name: "Export options" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Preview JSON" }));
+    const jsonDialog = await screen.findByRole("dialog", { name: "JSON preview" });
+    const jsonText = jsonDialog.querySelector("pre")?.textContent;
+    if (jsonText === null || jsonText === undefined) throw new Error("Missing scoped JSON preview");
+    const exported = JSON.parse(jsonText) as { scope: { type: string; title: string }; project: { description: string; sections: ReadonlyArray<{ title: string }>; tasks: ReadonlyArray<{ description: string; dueDate: string; labels: ReadonlyArray<string>; comments: ReadonlyArray<{ body: string }> }> }; inbox: unknown; comments: ReadonlyArray<{ body: string }>; dates: ReadonlyArray<{ dueDate: string }> };
+    expect(exported.scope).toEqual({ type: "project", id: "project-1", title: "Roadmap" });
+    expect(exported.inbox).toBeNull();
+    expect(exported.project).toMatchObject({ description: "Roadmap details", sections: [expect.objectContaining({ title: "Milestone" })], tasks: [expect.objectContaining({ description: "Detailed project note", dueDate: "2026-12-04", labels: ["planning"], comments: [expect.objectContaining({ body: "Project comment" })] })] });
+    expect(exported.comments).toEqual([expect.objectContaining({ body: "Project comment" })]);
+    expect(exported.dates).toEqual([expect.objectContaining({ dueDate: "2026-12-04" })]);
+    expect(jsonText).not.toContain("Inbox only");
+    fireEvent.keyDown(jsonDialog, { key: "Escape" });
+    expect(screen.getByRole("dialog", { name: "Export options" })).toBeInTheDocument();
   });
 
   it("exports a complete JSON document and previews all Markdown on the Export page", async () => {

@@ -268,6 +268,7 @@ test("creates projects, sections, subtasks, and exports markdown", async ({ cont
   await page.getByRole("button", { name: "Add subtask", exact: true }).click();
   await expect(page.getByLabel(`Section ${projectSection}`).getByText(subtask)).toBeVisible();
 
+  await page.getByRole("button", { name: "Export", exact: true }).click();
   await page.getByRole("button", { name: "Preview markdown" }).click();
   const markdownPreview = page.getByRole("dialog", { name: "Markdown preview" });
   await expect(markdownPreview.getByText(projectTask)).toBeVisible();
@@ -276,6 +277,8 @@ test("creates projects, sections, subtasks, and exports markdown", async ({ cont
   expect(projectMarkdown.match(/^# /gm)).toHaveLength(1);
   expect(projectMarkdown).toContain(`## ${projectSection}`);
   await page.getByRole("button", { name: "Close" }).click();
+  await expect(page.getByRole("dialog", { name: "Export options" })).toBeVisible();
+  await page.getByRole("button", { name: "Close export options" }).click();
 
   await page.getByRole("button", { name: "Inbox" }).click();
   await createSection(page)(sectionTitle);
@@ -341,9 +344,11 @@ test("creates projects, sections, subtasks, and exports markdown", async ({ cont
   await dragTaskLeftOnItself(page)(dragChild);
   await expect(page.getByText(dragChild).locator("..")).toHaveCSS("padding-left", "0px");
 
+  await page.getByRole("button", { name: "Export", exact: true }).click();
   await page.getByRole("button", { name: "Copy markdown" }).click();
-  await expect(page.getByText("Markdown copied")).toBeVisible();
+  await expect(page.locator('.export-options-modal [role="status"]')).toHaveText("Markdown copied");
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain(inboxTask);
+  await page.getByRole("button", { name: "Close export options" }).click();
 
   await page.getByRole("link", { name: "Export", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Export" })).toBeVisible();

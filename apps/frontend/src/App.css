@@ -672,6 +672,7 @@ h1 {
   background: rgb(34 31 31 / 0.35);
   z-index: 10;
 }
+.markdown-modal-backdrop.scope-preview-backdrop { z-index: 1200; }
 
 .markdown-modal {
   display: grid;
@@ -1057,6 +1058,8 @@ body {
 }
 
 .delete-all-tasks-button { display: inline-flex; align-items: center; gap: 6px; }
+.task-header-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 0; }
+.task-header-actions > button { min-height: 38px; }
 .task-scope-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
 .task-scope-heading h2 { margin: 0; color: #333; font-size: 16px; font-weight: 650; }
 .scope-add-task-button { display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 6px; padding: 6px 8px; color: #c83a2d; background: transparent; font: inherit; cursor: pointer; }
@@ -1742,3 +1745,20 @@ body {
 .export-format-actions button.btn-primary { border-color: #d6362b; color: #fff; background: #d6362b; }
 .export-format-actions button:hover { filter: brightness(.96); }
 @media (max-width: 820px) { .export-format-card { align-items: stretch; flex-direction: column; gap: 14px; } .export-format-actions { justify-content: flex-start; } }
+.scope-export-trigger { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-width: 104px; border: 1px solid #c82f24; border-radius: 7px; padding: 8px 14px; color: #fff; background: #d6362b; font: inherit; font-weight: 650; cursor: pointer; box-shadow: 0 1px 2px #00000012; }
+.scope-export-trigger:hover { border-color: #b92e24; color: #fff; background: #c93126; }
+.scope-export-trigger:focus-visible { outline: 3px solid #d6362b44; outline-offset: 2px; }
+.export-options-backdrop { position: fixed; inset: 0; z-index: 1100; display: grid; place-items: center; padding: 20px; background: #211a1666; }
+.export-options-modal { width: min(720px, 100%); max-height: calc(100vh - 40px); overflow-y: auto; display: grid; gap: 18px; padding: 22px; border: 1px solid #e8e2dd; border-radius: 12px; background: #fff; box-shadow: 0 18px 60px #0004; }
+.export-options-modal > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.export-options-modal > header .eyebrow { margin: 0 0 4px; color: #d6362b; }
+.export-options-modal h2 { margin: 0; font-size: 1.25rem; }
+.export-options-modal > header > button { display: grid; place-items: center; width: 34px; height: 34px; border: 0; border-radius: 6px; color: #6d655f; background: #f3f1ef; cursor: pointer; }
+.export-options-formats { display: grid; gap: 14px; }
+.export-options-modal .export-format-card { align-items: center; padding: 18px; }
+.export-options-modal .export-format-card h3 { margin: 0 0 6px; font-size: 1.1rem; }
+.export-options-modal .export-format-card p { max-width: 390px; }
+.export-options-modal .export-format-actions { gap: 8px; }
+.export-options-modal .export-format-actions button { min-height: 38px; }
+.export-copy-status { margin: 0; color: #625a54; font-size: .9rem; }
+@media (max-width: 620px) { .task-header-actions { gap: 8px; } .export-options-modal .export-format-card { align-items: stretch; flex-direction: column; gap: 14px; } .export-options-modal .export-format-actions { justify-content: flex-start; } }
