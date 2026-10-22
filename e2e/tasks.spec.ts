@@ -505,3 +505,48 @@ test("supports real mouse dragging of project rows", async ({ page }, testInfo) 
     return order.indexOf(second) < order.indexOf(first);
   }).toBe(true);
 });
+
+test("nests a project with touch dragging in the mobile sidebar", async ({ page }, testInfo) => {
+  const suffix = `${Date.now()}-${testInfo.workerIndex}`;
+  const targetTitle = `Touch target ${suffix}`;
+  const sourceTitle = `Touch source ${suffix}`;
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  await createProject(page)(targetTitle);
+  await createProject(page)(sourceTitle);
+
+  const sourceRow = page.locator(".project-nav-row").filter({ has: page.getByRole("button", { name: sourceTitle, exact: true }) });
+  const targetRow = page.locator(".project-nav-row").filter({ has: page.getByRole("button", { name: targetTitle, exact: true }) });
+  const sourceHandle = sourceRow.getByRole("button", { name: `Drag project ${sourceTitle}` });
+  const sourceBox = await sourceHandle.boundingBox();
+  const targetBox = await targetRow.boundingBox();
+  if (!sourceBox || !targetBox) throw new Error("Mobile project drag handles must be visible");
+  const sourceId = await sourceRow.getAttribute("data-project-id");
+  const targetId = await targetRow.getAttribute("data-project-id");
+  if (!sourceId || !targetId) throw new Error("Project rows must expose their IDs");
+
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
+  try {
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ id: 1, x: sourceBox.x + sourceBox.width / 2, y: sourceBox.y + sourceBox.height / 2 }]
+    });
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{ id: 1, x: targetBox.x + targetBox.width / 2, y: targetBox.y + targetBox.height / 2 }]
+    });
+    await expect(targetRow).toHaveClass(/project-drop-inside/);
+    const movedProjectResponse = page.waitForResponse((response) =>
+      response.url().endsWith(`/projects/${sourceId}/parent`) && response.request().method() === "PATCH"
+    );
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    const response = await movedProjectResponse;
+    expect(response.ok()).toBe(true);
+    expect(await response.json()).toMatchObject({ project: { id: sourceId, parentId: targetId } });
+    await expect.poll(() => sourceRow.evaluate((row) => getComputedStyle(row).paddingInlineStart)).toBe("18px");
+  } finally {
+    await cdp.detach();
+  }
+});

@@ -1,5 +1,6 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import type { Project, Section, Task, TaskNode } from "@todoist-clone/domain";
+import { BrowserRouter } from "react-router-dom";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -47,7 +48,7 @@ const section = (values: Partial<Section> & Pick<Section, "id" | "title">): Sect
 const renderApp = (api: ApplicationApi) =>
   render(
     <QueryClientProvider client={createQueryClient()}>
-      <TaskApp api={api} />
+      <BrowserRouter><TaskApp api={api} /></BrowserRouter>
     </QueryClientProvider>
   );
 
@@ -180,7 +181,9 @@ describe("TaskApp", () => {
     await userEvent.type(within(dialog).getByRole("textbox", { name: "Edit task title" }), "Plan launch{Enter}");
     await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", { title: "Plan launch" }));
     await userEvent.click(within(dialog).getByRole("button", { name: "Edit task description" }));
-    await userEvent.type(within(dialog).getByRole("textbox", { name: "Edit task description" }), "Ship release{Enter}");
+    const descriptionField = within(dialog).getByRole("textbox", { name: "Edit task description" });
+    await userEvent.type(descriptionField, "Ship release");
+    fireEvent.keyDown(descriptionField, { key: "Enter", ctrlKey: true });
     await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", { description: "Ship release" }));
     await userEvent.click(within(dialog).getByRole("button", { name: "Edit task description" }));
     await userEvent.clear(within(dialog).getByRole("textbox", { name: "Edit task description" }));
@@ -510,6 +513,34 @@ describe("TaskApp", () => {
     fireEvent.dragEnter(projectButton, { dataTransfer });
 
     expect(projectButton).toHaveClass("drop-active");
+  });
+
+  it("nests a project inside the mobile project drop target", async () => {
+    const moveProject = vi.fn(async (id: string, parentId: string | null): Promise<Project> => project({ id, title: "Source", parentId }));
+    renderApp(Object.freeze({
+      ...baseApi(Object.freeze([])),
+      listProjects: async () => Object.freeze([project({ id: "source", title: "Source" }), project({ id: "target", title: "Target" })]),
+      moveProject
+    }));
+
+    const sourceHandle = await screen.findByRole("button", { name: "Drag project Source" });
+    const targetButton = screen.getByRole("button", { name: "Target" });
+    const elementFromPointDescriptor = Object.getOwnPropertyDescriptor(document, "elementFromPoint");
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: vi.fn(() => targetButton) });
+    // This synthetic touch PointerEvent omits `button`; the drag must still start.
+    const pointer = (clientY: number) => ({ pointerId: 1, pointerType: "touch", clientX: 100, clientY });
+
+    try {
+      fireEvent.pointerDown(sourceHandle, pointer(50));
+      expect(sourceHandle.closest(".project-nav-row")).toHaveClass("project-dragging");
+      fireEvent.pointerMove(sourceHandle, pointer(55));
+      expect(targetButton.closest(".project-nav-row")).toHaveClass("project-drop-inside");
+      fireEvent.pointerUp(sourceHandle, pointer(55));
+      await waitFor(() => expect(moveProject).toHaveBeenCalledWith("source", "target"));
+    } finally {
+      if (elementFromPointDescriptor === undefined) Reflect.deleteProperty(document, "elementFromPoint");
+      else Object.defineProperty(document, "elementFromPoint", elementFromPointDescriptor);
+    }
   });
 
   it("moves a task inside another task with drag and drop", async () => {
@@ -859,7 +890,7 @@ describe("ToolsPage", () => {
 
     render(
       <QueryClientProvider client={createQueryClient()}>
-        <ToolsPage api={api} />
+        <BrowserRouter><ToolsPage api={api} /></BrowserRouter>
       </QueryClientProvider>
     );
 
@@ -940,7 +971,7 @@ describe("SettingsPage", () => {
 
     render(
       <QueryClientProvider client={createQueryClient()}>
-        <SettingsPage api={api} />
+        <BrowserRouter><SettingsPage api={api} /></BrowserRouter>
       </QueryClientProvider>
     );
 
