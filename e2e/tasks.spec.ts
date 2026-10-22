@@ -240,6 +240,45 @@ test("adapts task details to a small mobile viewport", async ({ page }, testInfo
   })).toBe(true);
 });
 
+test("adapts the Add date picker to a small mobile viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  await page.getByRole("button", { name: "Add task Q" }).click();
+  const addTaskDialog = page.getByRole("dialog", { name: "Add task" });
+  await addTaskDialog.getByRole("button", { name: /Add date/ }).click();
+
+  const dateDialog = page.getByRole("dialog", { name: "Add date" });
+  const backdrop = page.locator(".task-date-picker-backdrop");
+  await expect(dateDialog).toBeVisible();
+  expect(await backdrop.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return rect.x === 0 && rect.y === 0 && rect.width === 320 && rect.height === 568;
+  })).toBe(true);
+  expect(await dateDialog.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return rect.left === 0 && rect.right === 320 && rect.bottom === 568 && element.scrollWidth <= element.clientWidth;
+  })).toBe(true);
+
+  const today = dateDialog.getByRole("button", { name: "Today" });
+  const tomorrow = dateDialog.getByRole("button", { name: "Tomorrow" });
+  const quickDateLayout = await Promise.all([today.boundingBox(), tomorrow.boundingBox()]);
+  if (quickDateLayout.some((box) => box === null)) throw new Error("Quick date buttons must be visible");
+  expect(quickDateLayout[0]?.y).toBe(quickDateLayout[1]?.y);
+  expect(quickDateLayout[0]?.height).toBeGreaterThanOrEqual(44);
+  await expect(dateDialog.locator('[aria-current="date"]')).toBeVisible();
+  expect(await dateDialog.locator(".date-picker-grid").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+
+  await tomorrow.click();
+  const expectedTomorrow = new Date();
+  expectedTomorrow.setDate(expectedTomorrow.getDate() + 1);
+  await expect(dateDialog.getByLabel("New task date")).toHaveValue(expectedTomorrow.toLocaleDateString("en-CA"));
+  await expect(dateDialog).toBeVisible();
+  await dateDialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dateDialog).toHaveCount(0);
+  await expect(addTaskDialog).toBeVisible();
+});
+
 test("opens settings with deletion confirmation enabled by default", async ({ page }) => {
   await page.goto("/settings");
 
