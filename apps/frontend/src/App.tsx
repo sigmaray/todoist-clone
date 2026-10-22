@@ -294,6 +294,47 @@ const getDateShortcut = (shortcut: "Today" | "Tomorrow" | "This weekend" | "Next
   return toLocalIsoDate(date);
 };
 
+const DatePickerPanel = ({ value, onChange, inputLabel }: Readonly<{ value: string; onChange: (value: string) => void; inputLabel: string }>) => {
+  const [month, setMonth] = useState(() => (value || getDateShortcut("Today")).slice(0, 7));
+  useEffect(() => { if (value) setMonth(value.slice(0, 7)); }, [value]);
+  const [yearText, monthText] = month.split("-");
+  const year = Number(yearText);
+  const monthNumber = Number(monthText);
+  const monthDate = new Date(Date.UTC(year, monthNumber - 1, 1));
+  const monthLabel = monthDate.toLocaleDateString(undefined, { month: "long", year: "numeric", timeZone: "UTC" });
+  const firstDayOffset = (monthDate.getUTCDay() + 6) % 7;
+  const daysInMonth = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+  const cellCount = Math.ceil((firstDayOffset + daysInMonth) / 7) * 7;
+  const days = Array.from({ length: cellCount }, (_, index) => {
+    const day = index - firstDayOffset + 1;
+    return day > 0 && day <= daysInMonth ? day : null;
+  });
+  const shiftMonth = (amount: number) => {
+    const date = new Date(Date.UTC(year, monthNumber - 1 + amount, 1));
+    setMonth(`${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`);
+  };
+  const dayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const formatDate = (date: string) => new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+
+  return <div className="date-picker-panel">
+    <nav className="task-date-quick-links" aria-label="Quick dates">
+      {(["Today", "Tomorrow", "This weekend", "Next week"] as const).map((shortcut) => <button type="button" key={shortcut} onClick={() => onChange(getDateShortcut(shortcut))}>{shortcut}</button>)}
+    </nav>
+    <label className="date-picker-input">Date<input type="date" aria-label={inputLabel} value={value} onChange={(event) => onChange(event.target.value)} /></label>
+    <div className="date-picker-calendar">
+      <header><button type="button" aria-label="Previous month" onClick={() => shiftMonth(-1)}>‹</button><strong>{monthLabel}</strong><button type="button" aria-label="Next month" onClick={() => shiftMonth(1)}>›</button></header>
+      <div className="date-picker-grid" role="grid" aria-label={monthLabel}>
+        {dayLabels.map((label) => <span className="date-picker-weekday" role="columnheader" key={label}>{label}</span>)}
+        {days.map((day, index) => {
+          if (day === null) return <span role="gridcell" aria-hidden="true" className="date-picker-empty" key={`empty-${index}`} />;
+          const date = `${month}-${String(day).padStart(2, "0")}`;
+          return <span role="gridcell" key={date}><button type="button" aria-label={`Choose date ${formatDate(date)}`} aria-pressed={value === date} className={value === date ? "selected" : ""} onClick={() => onChange(date)}>{day}</button></span>;
+        })}
+      </div>
+    </div>
+  </div>;
+};
+
 const SearchPalette = ({ tasks, projects = Object.freeze([]), sections = Object.freeze([]), onTaskSelect }: Readonly<{ tasks: ReadonlyArray<Task>; projects?: ReadonlyArray<Project>; sections?: ReadonlyArray<Section>; onTaskSelect: (task: Task) => void }>) => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -498,6 +539,8 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const [addTaskTitle, setAddTaskTitle] = useState("");
   const [addTaskDescription, setAddTaskDescription] = useState("");
   const [addTaskDate, setAddTaskDate] = useState("");
+  const [addTaskDatePickerOpen, setAddTaskDatePickerOpen] = useState(false);
+  const [addTaskDateBeforePicker, setAddTaskDateBeforePicker] = useState("");
   const [addTaskLabels, setAddTaskLabels] = useState("");
   const [addTaskPlacement, setAddTaskPlacement] = useState(inboxPlacement);
   const [title, setTitle] = useState("");
@@ -532,7 +575,6 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const [detailProjectId, setDetailProjectId] = useState<ProjectId | null>(null);
   const [editingDetailField, setEditingDetailField] = useState<"title" | "description" | null>(null);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
-  const detailDateInputRef = useRef<HTMLInputElement>(null);
   const projectCreateInputRef = useRef<HTMLInputElement>(null);
   const sectionCreateInputRef = useRef<HTMLInputElement>(null);
   const [detailComment, setDetailComment] = useState("");
@@ -551,12 +593,6 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   useEffect(() => { const syncPath = () => setCurrentPath(window.location.pathname); window.addEventListener("popstate", syncPath); return () => window.removeEventListener("popstate", syncPath); }, []);
   useEffect(() => { if (addingProject) projectCreateInputRef.current?.focus(); }, [addingProject]);
   useEffect(() => { if (addingSection) sectionCreateInputRef.current?.focus(); }, [addingSection]);
-  useEffect(() => {
-    if (!datePickerOpen) return;
-    const input = detailDateInputRef.current;
-    input?.focus();
-    try { input?.showPicker(); } catch { /* Some browsers only allow showPicker from the click handler. */ }
-  }, [datePickerOpen]);
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape" && detailsTaskId !== null && editingDetailField === null && !datePickerOpen && detailLabelInput === "") setDetailsTaskId(null);
@@ -1401,7 +1437,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
         </FloatingOverlay>
       ) : null}
       {addTaskOpen ? <div className="task-details-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setAddTaskOpen(false); }}>
-        <section className="add-task-dialog" role="dialog" aria-modal="true" aria-label="Add task" onKeyDown={(event) => { if (event.key === "Escape") setAddTaskOpen(false); }}>
+        <section className="add-task-dialog" role="dialog" aria-modal="true" aria-label="Add task" onKeyDown={(event) => { if (event.key === "Escape" && !addTaskDatePickerOpen) setAddTaskOpen(false); }}>
           <header><h2>Add task</h2><button type="button" aria-label="Close add task" onClick={() => setAddTaskOpen(false)}><X size={18} /></button></header>
           <form onSubmit={async (event) => {
             event.preventDefault();
@@ -1419,10 +1455,11 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
             <label>Project or section<select aria-label="Add task project" value={addTaskPlacement} onChange={(event) => setAddTaskPlacement(event.target.value)}>
               {createPlacementOptions(activeProjects, allSections.filter((section) => section.projectId === null || activeProjects.some((project) => project.id === section.projectId))).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select></label>
-            <label>Date<input aria-label="New task date" type="date" value={addTaskDate} onChange={(event) => setAddTaskDate(event.target.value)} /></label>
+            <label>Date{addTaskDate ? <div className="task-detail-meta-value"><button type="button" className="task-detail-date" onClick={() => { setAddTaskDateBeforePicker(addTaskDate); setAddTaskDatePickerOpen(true); }}>{new Date(`${addTaskDate}T00:00:00`).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}</button><button type="button" aria-label="Remove task date" onClick={() => setAddTaskDate("")}>×</button></div> : <button type="button" aria-label="Add date" className="btn-primary add-task-date-button" onClick={() => { setAddTaskDateBeforePicker(addTaskDate); setAddTaskDatePickerOpen(true); }}>＋ Add date</button>}</label>
             <label>Labels<input aria-label="New task labels" value={addTaskLabels} onChange={(event) => setAddTaskLabels(event.target.value)} placeholder="Separate labels with commas" /></label>
             <div><button type="button" onClick={() => setAddTaskOpen(false)}>Cancel</button><button type="submit" className="btn-primary">Add task</button></div>
           </form>
+          {addTaskDatePickerOpen ? <div className="task-date-picker-backdrop"><section className="task-date-picker" role="dialog" aria-modal="true" aria-label="Add date" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setAddTaskDate(addTaskDateBeforePicker); setAddTaskDatePickerOpen(false); } }}><h3>Add date</h3><DatePickerPanel inputLabel="New task date" value={addTaskDate} onChange={setAddTaskDate} /><div className="task-date-picker-actions"><button type="button" onClick={() => { setAddTaskDate(addTaskDateBeforePicker); setAddTaskDatePickerOpen(false); }}>Cancel</button><button type="button" className="btn-primary" onClick={() => setAddTaskDatePickerOpen(false)}>Set date</button></div></section></div> : null}
         </section>
       </div> : null}
       {selectedDetailsTask !== null ? (
@@ -1457,7 +1494,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
                 <p className="task-autosave-status" aria-live="polite">{detailSaveStatus}</p>
               </aside>
             </div>
-            {datePickerOpen ? <div className="task-date-picker-backdrop"><section className="task-date-picker" role="dialog" aria-modal="true" aria-label="Change date" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setDetailDueDate(selectedDetailsTask.dueDate ?? ""); setDatePickerOpen(false); } if (event.key === "Enter") { event.preventDefault(); void saveTaskDetails({ dueDate: detailDueDate || null }).then((saved) => { if (saved) setDatePickerOpen(false); }); } }}><h3>{selectedDetailsTask.dueDate ? "Change date" : "Add date"}</h3><nav className="task-date-quick-links" aria-label="Quick dates">{(["Today", "Tomorrow", "This weekend", "Next week"] as const).map((shortcut) => <button type="button" key={shortcut} onClick={async () => { const date = getDateShortcut(shortcut); setDetailDueDate(date); if (await saveTaskDetails({ dueDate: date })) setDatePickerOpen(false); }}>{shortcut}</button>)}</nav><input ref={detailDateInputRef} autoFocus type="date" aria-label="New date" value={detailDueDate} onChange={(event) => setDetailDueDate(event.target.value)} /><div><button type="button" onClick={() => { setDetailDueDate(selectedDetailsTask.dueDate ?? ""); setDatePickerOpen(false); }}>Cancel</button><button type="button" className="btn-primary" onClick={async () => { if (await saveTaskDetails({ dueDate: detailDueDate || null })) setDatePickerOpen(false); }}>Save date</button></div></section></div> : null}
+            {datePickerOpen ? <div className="task-date-picker-backdrop"><section className="task-date-picker" role="dialog" aria-modal="true" aria-label="Change date" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setDetailDueDate(selectedDetailsTask.dueDate ?? ""); setDatePickerOpen(false); } if (event.key === "Enter" && (event.target as HTMLElement).tagName !== "BUTTON") { event.preventDefault(); void saveTaskDetails({ dueDate: detailDueDate || null }).then((saved) => { if (saved) setDatePickerOpen(false); }); } }}><h3>{selectedDetailsTask.dueDate ? "Change date" : "Add date"}</h3><DatePickerPanel inputLabel="New date" value={detailDueDate} onChange={setDetailDueDate} /><div className="task-date-picker-actions"><button type="button" onClick={() => { setDetailDueDate(selectedDetailsTask.dueDate ?? ""); setDatePickerOpen(false); }}>Cancel</button><button type="button" className="btn-primary" onClick={async () => { if (await saveTaskDetails({ dueDate: detailDueDate || null })) setDatePickerOpen(false); }}>Save date</button></div></section></div> : null}
           </section>
         </div>
       ) : null}

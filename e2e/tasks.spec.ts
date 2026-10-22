@@ -149,6 +149,7 @@ test("creates a task in the browser", async ({ page }, testInfo) => {
   await createTask(page)(title);
 
   await expect(page.getByText(title)).toBeVisible();
+  await expect(page.getByRole("button", { name: `Edit task ${title}` })).toHaveCSS("opacity", "1");
 
   await page.getByRole("button", { name: `Edit task ${title}` }).click();
   await page.getByLabel(`Edit ${title}`).fill(editedTitle);

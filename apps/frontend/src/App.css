@@ -1176,7 +1176,7 @@ body {
 }
 
 .section-actions {
-  opacity: 0;
+  opacity: 1;
   gap: 3px;
 }
 
@@ -1247,7 +1247,7 @@ body {
   color: #777;
   background: transparent;
   font-size: 16px;
-  opacity: 0;
+  opacity: 1;
 }
 
 .task-row:hover .task-action,
@@ -1651,7 +1651,7 @@ body {
 .task-detail-title-display:hover, .task-detail-description-display:hover { color: #b83f2d; }
 .task-detail-editor { display: grid; gap: 8px; }
 .task-detail-editor > input, .task-detail-editor > textarea, .task-details-sidebar input, .task-details-sidebar select { width: 100%; box-sizing: border-box; border: 1px solid #d7d0ca; border-radius: 8px; padding: 10px 12px; background: #fff; font: inherit; }
-.task-detail-editor > div, .task-details-sidebar section > div:not(.detail-label-chips), .task-date-picker > div { display: flex; justify-content: flex-end; gap: 8px; }
+.task-detail-editor > div, .task-details-sidebar section > div:not(.detail-label-chips) { display: flex; justify-content: flex-end; gap: 8px; }
 .task-details-modal button { cursor: pointer; }
 .task-detail-meta-value { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .task-detail-meta-value a, .task-detail-date { color: #514a45; text-decoration: none; }
@@ -1661,13 +1661,26 @@ body {
 .task-details-sidebar .detail-label-chips { justify-content: flex-start; }
 .task-autosave-status { margin: 8px 0; color: #817872; font-size: .82rem; }
 .task-date-picker-backdrop { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; background: #211a1666; }
-.task-date-picker { width: min(360px, calc(100% - 32px)); display: grid; gap: 16px; padding: 22px; border-radius: 12px; background: white; box-shadow: 0 18px 60px #0004; }
+.task-date-picker { width: min(440px, calc(100% - 32px)); max-height: calc(100% - 32px); overflow: auto; display: grid; gap: 16px; padding: 22px; border-radius: 12px; background: white; box-shadow: 0 18px 60px #0004; }
 .task-date-picker h3 { margin: 0; }
+.date-picker-panel { display: grid; gap: 14px; }
+.date-picker-input { display: grid; gap: 6px; color: #706861; }
+.date-picker-input input { box-sizing: border-box; width: 100%; border: 1px solid #d7d0ca; border-radius: 8px; padding: 9px 11px; font: inherit; }
+.date-picker-calendar { display: grid; gap: 10px; }
+.date-picker-calendar > header { display: flex; align-items: center; justify-content: space-between; }
+.date-picker-calendar > header button { width: 32px; height: 32px; border: 1px solid #e7e1dc; border-radius: 6px; background: #fff; font-size: 1.2rem; }
+.date-picker-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; text-align: center; }
+.date-picker-grid > span { display: grid; place-items: center; min-height: 36px; }
+.date-picker-weekday { color: #817872; font-size: .8rem; }
+.date-picker-grid [role="gridcell"] button { width: 34px; height: 34px; border: 0; border-radius: 50%; background: transparent; }
+.date-picker-grid [role="gridcell"] button:hover { background: #f5efeb; }
+.date-picker-grid [role="gridcell"] button.selected { color: white; background: #cf4937; }
+.task-date-picker-actions { display: flex; justify-content: flex-end; gap: 8px; }
 @media (max-width: 700px) { .task-details-modal { width: calc(100vw - 20px); height: calc(100vh - 20px); max-height: calc(100vh - 20px); } .task-details-layout { grid-template-columns: 1fr; overflow-y: auto; } .task-details-main { overflow: visible; padding: 20px; } .task-details-sidebar { overflow: visible; border-top: 1px solid #eee9e5; border-left: 0; padding: 16px 20px; } }
 
 .add-task-nav-button { display: flex; align-items: center; gap: 8px; color: #cf4937; font-weight: 650; }
 .add-task-nav-button kbd { margin-left: auto; border: 1px solid #e5dfdb; border-radius: 4px; padding: 1px 5px; color: #716a65; background: #fff; font-size: .75rem; }
-.add-task-dialog { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 40px); overflow: auto; padding: 22px; border-radius: 14px; background: #fff; box-shadow: 0 18px 60px #0004; }
+.add-task-dialog { position: relative; width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 40px); overflow: auto; padding: 22px; border-radius: 14px; background: #fff; box-shadow: 0 18px 60px #0004; }
 .add-task-dialog > header { display: flex; align-items: center; justify-content: space-between; margin: -22px -22px 18px; padding: 16px 22px; border-bottom: 1px solid #eee9e5; }
 .add-task-dialog h2 { margin: 0; font-size: 1.2rem; }
 .add-task-dialog form, .add-task-dialog label { display: grid; gap: 8px; }

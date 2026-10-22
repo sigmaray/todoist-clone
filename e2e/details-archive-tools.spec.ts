@@ -54,13 +54,15 @@ test("edits task details and copies all Markdown", async ({ context, page }) => 
   await expect(dateDialog.getByRole("button", { name: "Today" })).toBeVisible();
   await expect(dateDialog.getByRole("button", { name: "Tomorrow" })).toBeVisible();
   await dateDialog.getByRole("button", { name: "Today" }).click();
+  await expect(dateDialog).toBeVisible();
+  await expect(page.getByLabel("New date")).toHaveValue(new Date().toLocaleDateString("en-CA"));
+  await dateDialog.getByRole("button", { name: "Save date" }).click();
   await expect(taskDialog.locator(".task-detail-date")).toContainText(String(new Date().getFullYear()));
   await taskDialog.locator(".task-detail-date").click();
   await expect(page.getByRole("dialog", { name: "Change date" })).toBeVisible();
   await page.getByLabel("New date").press("Escape");
   await expect(taskDialog).toBeVisible();
-  await expect(page.getByRole("dialog", { name: "Change date" })).toBeVisible();
-  await page.getByRole("dialog", { name: "Change date" }).getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByRole("dialog", { name: "Change date" })).toHaveCount(0);
   await taskDialog.locator(".task-detail-date").click();
   await page.getByLabel("New date").fill("2026-11-01");
   await page.getByRole("dialog", { name: "Change date" }).getByRole("button", { name: "Save date" }).click();

@@ -22,7 +22,12 @@ test("task dialog, inline keyboard editing, navigation, search, and calendar wor
   await addDialog.getByLabel("New task title").fill(taskName);
   await addDialog.getByLabel("New task description").fill("Details from the quick add dialog");
   await addDialog.getByLabel("Add task project").selectOption({ label: project });
-  await addDialog.getByLabel("New task date").fill("2026-11-18");
+  await addDialog.getByRole("button", { name: /Add date/ }).click();
+  const addDateDialog = page.getByRole("dialog", { name: "Add date" });
+  await expect(addDateDialog.locator('[role="grid"]')).toBeVisible();
+  await addDateDialog.getByLabel("New task date").fill("2026-11-18");
+  await addDateDialog.getByRole("button", { name: "Set date" }).click();
+  await expect(addDialog).toBeVisible();
   await addDialog.getByLabel("New task labels").fill("focus, work");
   await addDialog.getByRole("button", { name: "Add task", exact: true }).click();
 
