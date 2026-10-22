@@ -23,7 +23,8 @@ const quoteIdentifier = (name: string) => {
 
 const migrationFiles = Object.freeze([
   new URL("../drizzle/0000_create_tasks.sql", import.meta.url),
-  new URL("../drizzle/0001_settings_auth.sql", import.meta.url)
+  new URL("../drizzle/0001_settings_auth.sql", import.meta.url),
+  new URL("../drizzle/0002_task_details_archives.sql", import.meta.url)
 ]);
 const protectedTables = Object.freeze(["app_settings", "sessions"]);
 
@@ -139,6 +140,21 @@ export const createToolsRouter = (databaseUrl: string, mode: string) => {
     const tables = await listTables(sql);
 
     return context.json({ tables: tables.map((table) => table.table_name) });
+  });
+
+  router.get("/records/:table", async (context) => {
+    const table = context.req.param("table");
+    const limitParam = context.req.query("limit") ?? "10";
+    const limit = limitParam === "all" ? null : Number(limitParam);
+    const tables = await listTables(sql);
+    if (!tableNamePattern.test(table) || !tables.some((item) => item.table_name === table)) return context.json({ error: "Unknown table" }, 404);
+    if (limit !== null && limit !== 10 && limit !== 100) return context.json({ error: "Limit must be 10, 100, or all" }, 400);
+    const columns = await sql<{ column_name: string }[]>`SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = ${table}`;
+    const orderColumn = columns.some((column) => column.column_name === "created_at") ? "created_at" : columns.some((column) => column.column_name === "id") ? "id" : null;
+    const ordering = orderColumn === null ? "" : ` ORDER BY ${quoteIdentifier(orderColumn)} DESC`;
+    const limitClause = limit === null ? "" : ` LIMIT ${limit}`;
+    const rows = await sql.unsafe(`SELECT * FROM ${quoteIdentifier(table)}${ordering}${limitClause}`);
+    return context.json({ rows, count: rows.length });
   });
 
   router.post("/clear-table", async (context) => {

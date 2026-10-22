@@ -9,6 +9,10 @@ import type { ApplicationApi, ToolsApi } from "./api";
 
 const task = (values: Partial<TaskNode> & Pick<TaskNode, "id" | "title">): TaskNode =>
   Object.freeze({
+    description: "",
+    dueDate: null,
+    labels: Object.freeze([]),
+    comments: Object.freeze([]),
     completed: false,
     priority: 4,
     parentId: null,
@@ -23,6 +27,7 @@ const task = (values: Partial<TaskNode> & Pick<TaskNode, "id" | "title">): TaskN
 
 const project = (values: Partial<Project> & Pick<Project, "id" | "title">): Project =>
   Object.freeze({
+    archived: false,
     lexicalOrder: "U",
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -58,11 +63,14 @@ const baseApi = (tasks: ReadonlyArray<TaskNode>): ApplicationApi =>
       Object.freeze({
         id: "project",
         title,
+        archived: false,
         lexicalOrder: "U",
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z"
       }),
     updateProject: async (id, title) => project({ id, title }),
+    duplicateProject: async (id) => project({ id: `${id}-copy`, title: "Project copy" }),
+    archiveProject: async (id, archived) => project({ id, title: "Project", archived }),
     deleteProject: async () => undefined,
     listSections: async () => Object.freeze([]),
     createSection: async (title, projectId) =>
@@ -151,6 +159,21 @@ describe("TaskApp", () => {
     renderApp(baseApi(Object.freeze([task({ id: "1", title: "Plan MVP" })])));
 
     expect(await screen.findByText("Plan MVP")).toBeInTheDocument();
+  });
+
+  it("opens task details and saves description, date, labels, and comments", async () => {
+    const updateTask = vi.fn(async (id: string, patch: Parameters<ApplicationApi["updateTask"]>[1]): Promise<Task> => task({ id, title: patch.title ?? "Plan MVP", description: patch.description ?? "", dueDate: patch.dueDate ?? null, labels: patch.labels ?? [], comments: patch.comments ?? [] }));
+    renderApp(Object.freeze({ ...baseApi(Object.freeze([task({ id: "task-1", title: "Plan MVP" })])), updateTask }));
+    await userEvent.click(await screen.findByRole("button", { name: "Plan MVP" }));
+    await userEvent.clear(screen.getByLabelText("Description"));
+    await userEvent.type(screen.getByLabelText("Description"), "Ship the release");
+    await userEvent.type(screen.getByLabelText("Date"), "2026-11-01");
+    await userEvent.type(screen.getByLabelText("Labels"), "work, launch");
+    await userEvent.type(screen.getByLabelText("Add comment"), "Looks good");
+    await userEvent.click(screen.getByRole("button", { name: "Add comment" }));
+    await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", expect.objectContaining({ comments: [expect.objectContaining({ body: "Looks good" })] })));
+    await userEvent.click(screen.getByRole("button", { name: "Save task" }));
+    await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", { title: "Plan MVP", description: "Ship the release", dueDate: "2026-11-01", labels: ["work", "launch"] }));
   });
 
   it("calls the create handler when a task is submitted", async () => {
@@ -253,7 +276,8 @@ describe("TaskApp", () => {
     );
 
     await screen.findByRole("button", { name: "Roadmap" });
-    await userEvent.click(screen.getByRole("button", { name: "Edit project Roadmap" }));
+    await userEvent.click(screen.getByLabelText("Project menu Roadmap"));
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
     await screen.findByRole("button", { name: "Save project" });
     const editInput = screen.getAllByLabelText("Project title").at(0);
 
@@ -267,7 +291,8 @@ describe("TaskApp", () => {
 
     await waitFor(() => expect(updateProject).toHaveBeenCalledWith("project-1", "Launch plan"));
 
-    await userEvent.click(await screen.findByRole("button", { name: "Delete project Launch plan" }));
+    await userEvent.click(screen.getByLabelText("Project menu Launch plan"));
+    await userEvent.click(await screen.findByRole("button", { name: "Delete" }));
 
     await waitFor(() => expect(deleteProject).toHaveBeenCalledWith("project-1"));
   });
@@ -622,6 +647,7 @@ describe("ToolsPage", () => {
     const runQuery = vi.fn(async () => Object.freeze({ rows: Object.freeze([{ id: "1" }]) }));
     const api: ToolsApi = Object.freeze({
       listTables: async () => Object.freeze(["tasks"]),
+      listRecords: async (table, limit) => Object.freeze({ table, limit, rows: [Object.freeze({ id: 1 })] }),
       clearTable,
       dropAllTables: async () => Object.freeze({ dropped: true }),
       migrate: async () => Object.freeze({ migrated: true }),
@@ -637,6 +663,8 @@ describe("ToolsPage", () => {
     );
 
     expect(await screen.findByText("Database Tools")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "View records" }));
+    await waitFor(() => expect(screen.getByText(/"limit": "10"/)).toBeInTheDocument());
     expect(screen.getByRole("link", { name: "Inbox" })).toHaveAttribute("href", "/");
     expect(screen.getByRole("link", { name: "Tools" })).toHaveAttribute("href", "/tools");
     await userEvent.click(screen.getByRole("button", { name: "Clear selected table" }));

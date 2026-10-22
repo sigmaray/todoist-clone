@@ -15,6 +15,13 @@
       "when": 1792672833000,
       "tag": "0001_settings_auth",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792674000000,
+      "tag": "0002_task_details_archives",
+      "breakpoints": true
     }
   ]
 }

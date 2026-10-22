@@ -180,7 +180,8 @@ test("creates projects, sections, subtasks, and exports markdown", async ({ cont
   await createProject(page)(projectTitle);
   await expect(page.getByRole("button", { name: projectTitle, exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: `Edit project ${projectTitle}` }).click();
+  await page.locator(`summary[aria-label="Project menu ${projectTitle}"]`).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByLabel("Project title").first().fill(`${projectTitle} edited`);
   await page.getByRole("button", { name: "Save project" }).click();
   await expect(page.getByRole("button", { name: `${projectTitle} edited`, exact: true })).toBeVisible();
@@ -275,6 +276,7 @@ test("creates projects, sections, subtasks, and exports markdown", async ({ cont
   await page.getByRole("button", { name: `Delete section ${sectionTitle} edited` }).click();
   await expect(page.getByRole("heading", { name: `${sectionTitle} edited` })).not.toBeVisible();
 
-  await page.getByRole("button", { name: `Delete project ${projectTitle} edited` }).click();
+  await page.locator(`summary[aria-label="Project menu ${projectTitle} edited"]`).click();
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(page.getByRole("button", { name: `${projectTitle} edited`, exact: true })).not.toBeVisible();
 });

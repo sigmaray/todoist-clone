@@ -11,6 +11,10 @@ import type { Task } from "./types";
 
 const task = (values: Partial<Task> & Pick<Task, "id" | "title" | "lexicalOrder">): Task =>
   Object.freeze({
+    description: "",
+    dueDate: null,
+    labels: Object.freeze([]),
+    comments: Object.freeze([]),
     completed: false,
     priority: 4,
     parentId: null,

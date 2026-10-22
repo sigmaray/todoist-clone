@@ -22,6 +22,10 @@ const createTaskSchema = z.object({
 
 const patchTaskSchema = z.object({
   title: z.string().trim().min(1).optional(),
+  description: z.string().max(20000).optional(),
+  dueDate: z.string().date().nullable().optional(),
+  labels: z.array(z.string().trim().min(1).max(64)).max(50).optional(),
+  comments: z.array(z.object({ id: z.string(), body: z.string().min(1).max(5000), createdAt: z.string() })).optional(),
   completed: z.boolean().optional(),
   priority: prioritySchema.optional(),
   projectId: z.string().nullable().optional(),
@@ -238,6 +242,18 @@ export const createApp = (
 
     const project = await repository.updateProject(context.req.param("id"), result.data.title);
 
+    return project === null ? context.json({ error: "Project not found" }, 404) : context.json({ project });
+  });
+
+  app.post("/projects/:id/duplicate", async (context) => {
+    const project = await repository.duplicateProject(context.req.param("id"));
+    return project === null ? context.json({ error: "Project not found" }, 404) : context.json({ project }, 201);
+  });
+
+  app.patch("/projects/:id/archive", async (context) => {
+    const result = z.object({ archived: z.boolean() }).safeParse(await parseJson(context.req.raw));
+    if (!result.success) return context.json({ error: "Invalid archive state" }, 400);
+    const project = await repository.setProjectArchived(context.req.param("id"), result.data.archived);
     return project === null ? context.json({ error: "Project not found" }, 404) : context.json({ project });
   });
 

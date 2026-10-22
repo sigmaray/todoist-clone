@@ -5,6 +5,8 @@ export type TaskApi = Readonly<{
   listProjects: () => Promise<ReadonlyArray<Project>>;
   createProject: (title: string) => Promise<Project>;
   updateProject: (id: ProjectId, title: string) => Promise<Project>;
+  duplicateProject: (id: ProjectId) => Promise<Project>;
+  archiveProject: (id: ProjectId, archived: boolean) => Promise<Project>;
   deleteProject: (id: ProjectId) => Promise<void>;
   listSections: () => Promise<ReadonlyArray<Section>>;
   createSection: (title: string, projectId: ProjectId | null) => Promise<Section>;
@@ -12,7 +14,7 @@ export type TaskApi = Readonly<{
   deleteSection: (id: SectionId) => Promise<void>;
   createTask: (title: string, projectId: ProjectId | null, sectionId: SectionId | null, parentId: string | null) => Promise<Task>;
   patchTask: (id: string, completed: boolean) => Promise<Task>;
-  updateTask: (id: string, patch: Readonly<{ title?: string; priority?: Priority }>) => Promise<Task>;
+  updateTask: (id: string, patch: Readonly<{ title?: string; description?: string; dueDate?: string | null; labels?: ReadonlyArray<string>; comments?: Task["comments"]; priority?: Priority }>) => Promise<Task>;
   moveTask: (
     id: string,
     projectId: ProjectId | null,
@@ -26,6 +28,7 @@ export type TaskApi = Readonly<{
 
 export type ToolsApi = Readonly<{
   listTables: () => Promise<ReadonlyArray<string>>;
+  listRecords: (table: string, limit: "10" | "100" | "all") => Promise<unknown>;
   clearTable: (table: string) => Promise<unknown>;
   dropAllTables: () => Promise<unknown>;
   migrate: () => Promise<unknown>;
@@ -115,6 +118,14 @@ export const createTaskApi = (baseUrl = ""): ApplicationApi =>
         })
       );
 
+      return data.project;
+    },
+    duplicateProject: async (id) => {
+      const data = await postJson<{ project: Project }>(`${baseUrl}/projects/${id}/duplicate`);
+      return data.project;
+    },
+    archiveProject: async (id, archived) => {
+      const data = await readJson<{ project: Project }>(await fetch(`${baseUrl}/projects/${id}/archive`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ archived }) }));
       return data.project;
     },
     deleteProject: async (id) => {
@@ -227,6 +238,7 @@ export const createToolsApi = (baseUrl = ""): ToolsApi =>
 
       return data.tables;
     },
+    listRecords: async (table, limit) => readJson(await fetch(`${baseUrl}/tools-api/records/${encodeURIComponent(table)}?limit=${limit}`)),
     clearTable: async (table) => postJson(`${baseUrl}/tools-api/clear-table`, { table }),
     dropAllTables: async () => postJson(`${baseUrl}/tools-api/drop-all`),
     migrate: async () => postJson(`${baseUrl}/tools-api/migrate`),

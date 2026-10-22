@@ -17,6 +17,10 @@ const toTask = (row: TaskRow): Task =>
   Object.freeze({
     id: row.id,
     title: row.title,
+    description: row.description,
+    dueDate: row.dueDate,
+    labels: Object.freeze(row.labels),
+    comments: Object.freeze(row.comments as Task["comments"]),
     completed: row.completed,
     priority: row.priority as Priority,
     parentId: row.parentId,
@@ -31,6 +35,7 @@ const toProject = (row: ProjectRow): Project =>
   Object.freeze({
     id: row.id,
     title: row.title,
+    archived: row.archived,
     lexicalOrder: row.lexicalOrder,
     createdAt: normalizeDate(row.createdAt),
     updatedAt: normalizeDate(row.updatedAt)
@@ -118,6 +123,7 @@ export const createPostgresTaskRepository = (databaseUrl: string): TaskRepositor
         .values({
           id: crypto.randomUUID(),
           title,
+        archived: false,
           lexicalOrder: generateLexicalOrder(siblings.at(-1)?.lexicalOrder ?? null, null)
         })
         .returning();
@@ -172,6 +178,26 @@ export const createPostgresTaskRepository = (databaseUrl: string): TaskRepositor
       await db.delete(sectionsTable).where(eq(sectionsTable.projectId, id));
 
       return true;
+    },
+    duplicateProject: async (id) => {
+      const projectRows = await db.select().from(projectsTable).where(eq(projectsTable.id, id)).limit(1);
+      const source = projectRows[0];
+      if (source === undefined) return null;
+      const sourceSections = await db.select().from(sectionsTable).where(eq(sectionsTable.projectId, id)).orderBy(sectionOrder);
+      const sourceTasks = await db.select().from(tasksTable).where(eq(tasksTable.projectId, id)).orderBy(rowOrder);
+      const createdAt = new Date();
+      const newProjectId = crypto.randomUUID();
+      const copiedProject = await db.insert(projectsTable).values({ id: newProjectId, title: `${source.title} copy`, archived: false, lexicalOrder: generateLexicalOrder(source.lexicalOrder, null) }).returning();
+      const sectionMap = new Map(sourceSections.map((section) => [section.id, crypto.randomUUID()]));
+      if (sourceSections.length) await db.insert(sectionsTable).values(sourceSections.map((section) => ({ id: sectionMap.get(section.id)!, title: section.title, projectId: newProjectId, lexicalOrder: section.lexicalOrder })));
+      const taskMap = new Map(sourceTasks.map((task) => [task.id, crypto.randomUUID()]));
+      if (sourceTasks.length) await db.insert(tasksTable).values(sourceTasks.map((task) => ({ ...task, id: taskMap.get(task.id)!, projectId: newProjectId, sectionId: task.sectionId === null ? null : sectionMap.get(task.sectionId) ?? null, parentId: task.parentId === null ? null : taskMap.get(task.parentId) ?? null, createdAt, updatedAt: createdAt })));
+      const project = copiedProject[0];
+      return project === undefined ? null : toProject(project);
+    },
+    setProjectArchived: async (id, archived) => {
+      const rows = await db.update(projectsTable).set({ archived, updatedAt: new Date() }).where(eq(projectsTable.id, id)).returning();
+      return firstProject(rows);
     },
     listSections: async () => {
       const rows = await db.select().from(sectionsTable).orderBy(sectionOrder);
@@ -264,6 +290,7 @@ export const createPostgresTaskRepository = (databaseUrl: string): TaskRepositor
         .update(tasksTable)
         .set({
           ...patch,
+          labels: patch.labels === undefined ? undefined : [...patch.labels],
           updatedAt: new Date()
         })
         .where(eq(tasksTable.id, id))

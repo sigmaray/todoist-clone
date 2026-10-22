@@ -150,6 +150,19 @@ describe("POST /tasks", () => {
     await agent.delete("/projects/missing").expect(404);
   });
 
+  it("persists task details and supports archiving and duplicating projects", async () => {
+    const agent = request(createTestServer());
+    const project = (await agent.post("/projects").send({ title: "Plan" }).expect(201)).body.project as { id: string };
+    const task = (await agent.post("/tasks").send({ title: "Draft", projectId: project.id }).expect(201)).body.task as { id: string };
+    await agent.patch(`/tasks/${task.id}`).send({ description: "Details", dueDate: "2026-11-01", labels: ["work"], comments: [{ id: "c1", body: "First comment", createdAt: new Date().toISOString() }] }).expect(200);
+    await agent.patch(`/projects/${project.id}/archive`).send({ archived: true }).expect(200);
+    const duplicate = await agent.post(`/projects/${project.id}/duplicate`).expect(201);
+    const projects = await agent.get("/projects").expect(200);
+    const tasks = await agent.get("/tasks").expect(200);
+    expect(projects.body.projects).toEqual(expect.arrayContaining([expect.objectContaining({ id: project.id, archived: true }), expect.objectContaining({ id: duplicate.body.project.id, title: "Plan copy" })]));
+    expect(tasks.body.tasks).toEqual(expect.arrayContaining([expect.objectContaining({ description: "Details", dueDate: "2026-11-01", labels: ["work"], comments: [expect.objectContaining({ body: "First comment" })] })]));
+  });
+
   it("reorders tasks with beforeId and afterId", async () => {
     const agent = request(createTestServer());
     const create = async (title: string) => (await agent.post("/tasks").send({ title }).expect(201)).body.task as { id: string };

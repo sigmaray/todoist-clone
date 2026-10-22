@@ -3,6 +3,10 @@ import type { Priority, Project, ProjectId, Section, SectionId, Task, TaskId } f
 
 export type TaskPatch = Readonly<{
   title?: string;
+  description?: string;
+  dueDate?: string | null;
+  labels?: ReadonlyArray<string>;
+  comments?: ReadonlyArray<Readonly<{ id: string; body: string; createdAt: string }>>;
   completed?: boolean;
   priority?: Priority;
   projectId?: ProjectId | null;
@@ -23,6 +27,8 @@ export type TaskRepository = Readonly<{
   createProject: (title: string) => Promise<Project>;
   updateProject: (id: ProjectId, title: string) => Promise<Project | null>;
   deleteProject: (id: ProjectId) => Promise<boolean>;
+  duplicateProject: (id: ProjectId) => Promise<Project | null>;
+  setProjectArchived: (id: ProjectId, archived: boolean) => Promise<Project | null>;
   listSections: () => Promise<ReadonlyArray<Section>>;
   createSection: (title: string, projectId: ProjectId | null) => Promise<Section>;
   updateSection: (id: SectionId, title: string) => Promise<Section | null>;
@@ -95,6 +101,7 @@ export const createMemoryTaskRepository = (
       const project = Object.freeze({
         id: crypto.randomUUID(),
         title,
+        archived: false,
         lexicalOrder: generateLexicalOrder(projects.at(-1)?.lexicalOrder ?? null, null),
         createdAt,
         updatedAt: createdAt
@@ -139,6 +146,29 @@ export const createMemoryTaskRepository = (
       projects = Object.freeze(projects.filter((project) => project.id !== id));
 
       return true;
+    },
+    duplicateProject: async (id) => {
+      const source = projects.find((project) => project.id === id);
+      if (source === undefined) return null;
+      const createdAt = now();
+      const duplicated = Object.freeze({ ...source, id: crypto.randomUUID(), title: `${source.title} copy`, archived: false, createdAt, updatedAt: createdAt });
+      const sourceSections = sections.filter((section) => section.projectId === id);
+      const sectionMap = new Map(sourceSections.map((section) => [section.id, crypto.randomUUID()]));
+      const newSections = sourceSections.map((section) => Object.freeze({ ...section, id: sectionMap.get(section.id)!, projectId: duplicated.id, createdAt, updatedAt: createdAt }));
+      const sourceTasks = tasks.filter((task) => task.projectId === id);
+      const taskMap = new Map(sourceTasks.map((task) => [task.id, crypto.randomUUID()]));
+      const newTasks = sourceTasks.map((task) => Object.freeze({ ...task, id: taskMap.get(task.id)!, projectId: duplicated.id, sectionId: task.sectionId === null ? null : sectionMap.get(task.sectionId) ?? null, parentId: task.parentId === null ? null : taskMap.get(task.parentId) ?? null, createdAt, updatedAt: createdAt }));
+      projects = Object.freeze([...projects, duplicated]);
+      sections = Object.freeze([...sections, ...newSections]);
+      replace([...tasks, ...newTasks]);
+      return duplicated;
+    },
+    setProjectArchived: async (id, archived) => {
+      const existing = projects.find((project) => project.id === id);
+      if (existing === undefined) return null;
+      const updated = Object.freeze({ ...existing, archived, updatedAt: now() });
+      projects = Object.freeze(projects.map((project) => project.id === id ? updated : project));
+      return updated;
     },
     listSections: async () => sections,
     createSection: async (title, projectId) => {
@@ -191,6 +221,10 @@ export const createMemoryTaskRepository = (
       const task = Object.freeze({
         id: crypto.randomUUID(),
         title,
+        description: "",
+        dueDate: null,
+        labels: Object.freeze([]),
+        comments: Object.freeze([]),
         completed: false,
         priority,
         parentId,

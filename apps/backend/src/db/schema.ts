@@ -1,4 +1,4 @@
-import { boolean, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, integer, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
 export const appSettings = pgTable("app_settings", {
   id: text("id").primaryKey(),
@@ -16,6 +16,7 @@ export const sessions = pgTable("sessions", {
 export const projects = pgTable("projects", {
   id: text("id").primaryKey(),
   title: text("title").notNull(),
+  archived: boolean("archived").notNull().default(false),
   lexicalOrder: text("lexical_order").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
@@ -33,6 +34,10 @@ export const sections = pgTable("sections", {
 export const tasks = pgTable("tasks", {
   id: text("id").primaryKey(),
   title: text("title").notNull(),
+  description: text("description").notNull().default(""),
+  dueDate: text("due_date"),
+  labels: text("labels").array().notNull().default([]),
+  comments: jsonb("comments").notNull().default([]),
   completed: boolean("completed").notNull().default(false),
   priority: integer("priority").notNull().default(4),
   parentId: text("parent_id"),

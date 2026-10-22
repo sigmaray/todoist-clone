@@ -1,22 +1,27 @@
 import { defineConfig, devices } from "@playwright/test";
+import process from "node:process";
+
+const backendPort = process.env.E2E_BACKEND_PORT ?? "3100";
+const frontendPort = process.env.E2E_FRONTEND_PORT ?? "5174";
+const databaseUrl = process.env.E2E_DATABASE_URL ?? "postgres://todoist:todoist@127.0.0.1:5432/todoist_e2e";
 
 export default defineConfig({
   testDir: "./e2e",
   outputDir: process.env.PLAYWRIGHT_OUTPUT_DIR ?? "/tmp/todoist-clone-playwright-results",
   use: {
-    baseURL: "http://127.0.0.1:5173",
+    baseURL: `http://127.0.0.1:${frontendPort}`,
     trace: "on-first-retry"
   },
   webServer: [
     {
-      command: "pnpm --filter @todoist-clone/backend dev",
-      url: "http://127.0.0.1:3000/tasks",
-      reuseExistingServer: true
+      command: `DATABASE_URL=${databaseUrl} PORT=${backendPort} pnpm --filter @todoist-clone/backend exec drizzle-kit migrate --config drizzle.config.ts && DATABASE_URL=${databaseUrl} PORT=${backendPort} pnpm --filter @todoist-clone/backend dev`,
+      url: `http://127.0.0.1:${backendPort}/tasks`,
+      reuseExistingServer: false
     },
     {
-      command: "pnpm --filter @todoist-clone/frontend dev --host 127.0.0.1",
-      url: "http://127.0.0.1:5173",
-      reuseExistingServer: true
+      command: `VITE_API_TARGET=http://127.0.0.1:${backendPort} pnpm --filter @todoist-clone/frontend dev --host 127.0.0.1 --port ${frontendPort}`,
+      url: `http://127.0.0.1:${frontendPort}`,
+      reuseExistingServer: false
     }
   ],
   projects: [

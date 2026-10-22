@@ -12,7 +12,7 @@ import {
 import type { Project, ProjectId, Section, SectionId, Task, TaskId, TaskNode } from "@todoist-clone/domain";
 import clsx from "clsx";
 import JSZip from "jszip";
-import { Archive, ClipboardCopy, Code2, Database, Download, Edit3, Eye, Inbox, KeyRound, Plus, Settings, Trash2, X } from "lucide-react";
+import { Archive, ClipboardCopy, Code2, Copy, Database, Download, Edit3, Eye, Inbox, KeyRound, MoreHorizontal, Plus, Settings, Trash2, X } from "lucide-react";
 import type { DragEvent, FormEvent, KeyboardEvent, ReactElement } from "react";
 import { useEffect, useState } from "react";
 import "./vendor/bootstrap.min.css";
@@ -51,6 +51,7 @@ const renderTaskNodes = (
   actions: Readonly<{
     toggleTask: (task: TaskNode) => void;
     startEditing: (task: TaskNode) => void;
+    openDetails: (task: TaskNode) => void;
     deleteTask: (task: TaskNode) => void;
     startSubtask: (task: TaskNode) => void;
     submitSubtask: (task: TaskNode) => void;
@@ -144,7 +145,7 @@ const renderTaskNodes = (
               </div>
             </form>
           ) : (
-            <span className={task.completed ? "task-title completed" : "task-title"}>{task.title}</span>
+            <button type="button" className={task.completed ? "task-title completed" : "task-title"} onClick={() => actions.openDetails(task)}>{task.title}</button>
           )}
           <button type="button" className="task-action" aria-label={`Edit task ${task.title}`} onClick={() => actions.startEditing(task)}>
             <Edit3 size={14} aria-hidden="true" />
@@ -385,6 +386,16 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const [editTitle, setEditTitle] = useState("");
   const [editPlacement, setEditPlacement] = useState(inboxPlacement);
   const [markdownModal, setMarkdownModal] = useState<Readonly<{ title: string; markdown: string }> | null>(null);
+  const [detailsTaskId, setDetailsTaskId] = useState<TaskId | null>(null);
+  const [detailTitle, setDetailTitle] = useState("");
+  const [detailDescription, setDetailDescription] = useState("");
+  const [detailDueDate, setDetailDueDate] = useState("");
+  const [detailLabels, setDetailLabels] = useState("");
+  const [detailComment, setDetailComment] = useState("");
+  const [detailSubtask, setDetailSubtask] = useState("");
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [editingCommentBody, setEditingCommentBody] = useState("");
+  const [openProjectMenuId, setOpenProjectMenuId] = useState<ProjectId | null>(null);
   const [copyStatus, setCopyStatus] = useState("");
   const queryClient = useQueryClient();
   const markdownFloating = useFloating({ open: markdownModal !== null });
@@ -458,6 +469,19 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
       await queryClient.invalidateQueries({ queryKey: taskQueryKey });
     }
   });
+
+  const duplicateProjectMutation = useMutation({
+    mutationFn: api.duplicateProject,
+    onSuccess: async (project) => {
+      queryClient.setQueryData(projectQueryKey, (current: ReadonlyArray<Project> | undefined) => appendById(current, project));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: projectQueryKey }),
+        queryClient.invalidateQueries({ queryKey: sectionQueryKey }),
+        queryClient.invalidateQueries({ queryKey: taskQueryKey })
+      ]);
+    }
+  });
+  const archiveProjectMutation = useMutation({ mutationFn: ({ id, archived }: Readonly<{ id: ProjectId; archived: boolean }>) => api.archiveProject(id, archived), onSuccess: (project) => queryClient.setQueryData(projectQueryKey, (current: ReadonlyArray<Project> | undefined) => appendById(current, project)) });
 
   const requestProjectDelete = (project: Project) => {
     if (confirmDeletion(`Delete project “${project.title}” and all its tasks?`)) {
@@ -738,6 +762,14 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     setEditPlacement(taskPlacement(task));
   };
 
+  const openDetails = (task: TaskNode) => {
+    setDetailsTaskId(task.id);
+    setDetailTitle(task.title);
+    setDetailDescription(task.description);
+    setDetailDueDate(task.dueDate ?? "");
+    setDetailLabels(task.labels.join(", "));
+  };
+
   const submitEdit = (task: TaskNode) => {
     if (editTitle.trim().length === 0) {
       return;
@@ -749,13 +781,16 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const allTasks = tasks.data ?? Object.freeze([]);
   const flatTasks = flattenTaskNodes(allTasks);
   const allProjects = projects.data ?? Object.freeze([]);
+  const activeProjects = allProjects.filter((project) => !project.archived);
   const allSections = sections.data ?? Object.freeze([]);
+  const selectedDetailsTask = detailsTaskId === null ? null : findTaskNode(allTasks, detailsTaskId);
   const inboxSections = allSections.filter((section) => section.projectId === null);
   const inboxRootTasks = allTasks.filter((task) => task.projectId === null && task.sectionId === null);
 
   const taskActions = Object.freeze({
     toggleTask: toggleMutation.mutate,
     startEditing,
+    openDetails,
     startSubtask,
     startDragging,
     deleteTask: requestTaskDelete,
@@ -777,7 +812,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     subtaskTitle,
     draggingTaskId,
     activeDragTarget,
-    placementOptions: createPlacementOptions(allProjects, allSections),
+    placementOptions: createPlacementOptions(activeProjects, allSections),
     moveTaskOntoTask,
     markDragTarget,
     clearDragTarget: () => setActiveDragTarget(null),
@@ -855,9 +890,10 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
           <Settings size={16} aria-hidden="true" />
           Settings
         </a>
+        <a className="nav-button nav-link-button" href="/archived-projects"><Archive size={16} aria-hidden="true" /> Archived projects</a>
         <div className="sidebar-group">
           <h2>My Projects</h2>
-          {allProjects.map((project) =>
+          {activeProjects.map((project) =>
             editProjectId === project.id ? (
               <form key={project.id} className="project-edit-form" onSubmit={submitProjectEdit(project)}>
                 <label htmlFor={`project-edit-${project.id}`}>Project title</label>
@@ -897,29 +933,26 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
                 >
                   {project.title}
                 </button>
-                <button type="button" aria-label={`Edit project ${project.title}`} onClick={() => startProjectEdit(project)}>
-                  <Edit3 size={14} aria-hidden="true" />
-                </button>
-                <button
-                  type="button"
-                  className="danger"
-                  aria-label={`Delete project ${project.title}`}
-                  onClick={() => requestProjectDelete(project)}
-                >
-                  <Trash2 size={14} aria-hidden="true" />
-                </button>
+                <details className="project-menu" open={openProjectMenuId === project.id}>
+                  <summary aria-label={`Project menu ${project.title}`} onClick={(event) => { event.preventDefault(); setOpenProjectMenuId((current) => current === project.id ? null : project.id); }}><MoreHorizontal size={17} aria-hidden="true" /></summary>
+                  <div className="project-menu-items">
+                    <button type="button" onClick={() => { setOpenProjectMenuId(null); startProjectEdit(project); }}><Edit3 size={14} aria-hidden="true" /> Edit</button>
+                    <button type="button" onClick={() => { setOpenProjectMenuId(null); duplicateProjectMutation.mutate(project.id); }}><Copy size={14} aria-hidden="true" /> Duplicate</button>
+                    <button type="button" onClick={() => { setOpenProjectMenuId(null); archiveProjectMutation.mutate({ id: project.id, archived: true }); if (targetProjectId === project.id) { setTargetProjectId(null); setTargetSectionId(null); } }}><Archive size={14} aria-hidden="true" /> Archive</button>
+                    <button type="button" className="danger" onClick={() => { setOpenProjectMenuId(null); requestProjectDelete(project); }}><Trash2 size={14} aria-hidden="true" /> Delete</button>
+                  </div>
+                </details>
               </div>
             )
           )}
         </div>
-        <form className="compact-form" onSubmit={submitProject}>
-          <label htmlFor="project-title">Project title</label>
-          <input id="project-title" value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} />
-          <button type="submit">
-            <Plus size={16} aria-hidden="true" />
-            Add project
-          </button>
-        </form>
+        <div className="card bg-light border p-3 sidebar-create-block">
+          <form className="compact-form m-0" onSubmit={submitProject}>
+            <label htmlFor="project-title">Project title</label>
+            <input id="project-title" value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} />
+            <button type="submit"><Plus size={16} aria-hidden="true" />Add project</button>
+          </form>
+        </div>
         <button type="button" className="nav-button sidebar-export" onClick={exportZip}>
           <Archive size={16} aria-hidden="true" />
           Export all ZIP
@@ -927,6 +960,10 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
         <button type="button" className="nav-button sidebar-export" onClick={exportMarkdown}>
           <Download size={16} aria-hidden="true" />
           Export all markdown
+        </button>
+        <button type="button" className="nav-button sidebar-export" onClick={async () => { await copyText(allMarkdown); setCopyStatus("All markdown copied"); }}>
+          <ClipboardCopy size={16} aria-hidden="true" />
+          Copy all markdown
         </button>
         <button
           type="button"
@@ -955,23 +992,15 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
           </div>
         </header>
 
-        <form className="task-form" onSubmit={submit}>
-          <label className="input-label" htmlFor="task-title">
-            Task title for {taskTargetLabel}
-          </label>
-          <div className="input-row">
-            <input
-              id="task-title"
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              placeholder="Add a task"
-            />
-            <button type="submit" disabled={createMutation.isPending}>
-              <Plus size={16} aria-hidden="true" />
-              Add task
-            </button>
-          </div>
-        </form>
+        <div className="card bg-light border p-3 task-create-block mb-3">
+          <form className="task-form m-0" onSubmit={submit}>
+            <label className="input-label" htmlFor="task-title">Task title for {taskTargetLabel}</label>
+            <div className="input-row">
+              <input id="task-title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Add a task" />
+              <button type="submit" disabled={createMutation.isPending}><Plus size={16} aria-hidden="true" />Add task</button>
+            </div>
+          </form>
+        </div>
 
         {tasks.isLoading ? <p className="muted">Loading tasks...</p> : null}
         {tasks.isError ? <p className="error">Unable to load tasks.</p> : null}
@@ -988,14 +1017,13 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
               <h2>Inbox</h2>
               {inboxRootTasks.length > 0 ? renderTaskNodes(inboxRootTasks, taskActions) : <p className="empty">No inbox tasks yet.</p>}
             </section>
-            <form className="compact-form inline" onSubmit={submitSection}>
-              <label htmlFor="section-title">Section title</label>
-              <input id="section-title" value={sectionTitle} onChange={(event) => setSectionTitle(event.target.value)} />
-              <button type="submit">
-                <Plus size={16} aria-hidden="true" />
-                Add section
-              </button>
-            </form>
+            <div className="card bg-light border p-3 section-create-block">
+              <form className="compact-form inline m-0" onSubmit={submitSection}>
+                <label htmlFor="section-title">Section title</label>
+                <input id="section-title" value={sectionTitle} onChange={(event) => setSectionTitle(event.target.value)} />
+                <button type="submit"><Plus size={16} aria-hidden="true" />Add section</button>
+              </form>
+            </div>
             {inboxSections.map((section) => {
               const sectionTasks = allTasks.filter((task) => task.projectId === null && task.sectionId === section.id);
 
@@ -1102,6 +1130,36 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
           </FloatingFocusManager>
         </FloatingOverlay>
       ) : null}
+      {selectedDetailsTask !== null ? (
+        <div className="task-details-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDetailsTaskId(null); }}>
+          <section className="task-details-modal" role="dialog" aria-modal="true" aria-label={`Task details: ${selectedDetailsTask.title}`} onKeyDown={(event) => { if (event.key === "Escape") setDetailsTaskId(null); }}>
+            <header><h2>Task details</h2><button type="button" aria-label="Close task details" onClick={() => setDetailsTaskId(null)}><X size={18} /></button></header>
+            <form onSubmit={async (event) => {
+              event.preventDefault();
+              await api.updateTask(selectedDetailsTask.id, { title: detailTitle.trim(), description: detailDescription, dueDate: detailDueDate || null, labels: detailLabels.split(",").map((label) => label.trim()).filter(Boolean) });
+              await queryClient.invalidateQueries({ queryKey: taskQueryKey });
+              setDetailsTaskId(null);
+            }}>
+              <label>Title<input autoFocus value={detailTitle} onChange={(event) => setDetailTitle(event.target.value)} required /></label>
+              <label>Description<textarea value={detailDescription} onChange={(event) => setDetailDescription(event.target.value)} rows={4} /></label>
+              <label>Date<input type="date" value={detailDueDate} onChange={(event) => setDetailDueDate(event.target.value)} /></label>
+              <label>Labels<input value={detailLabels} onChange={(event) => setDetailLabels(event.target.value)} placeholder="Comma separated labels" /></label>
+              <fieldset><legend>Subtasks</legend>
+                {selectedDetailsTask.children.map((child) => <div className="details-subtask-row" key={child.id}><button type="button" className="details-subtask" onClick={() => openDetails(child)}>{child.title}</button><button type="button" aria-label={`Delete subtask ${child.title}`} onClick={async () => { if (!confirmDeletion(`Delete subtask “${child.title}” and its descendants?`)) return; await api.deleteTask(child.id); await queryClient.invalidateQueries({ queryKey: taskQueryKey }); }}>Delete</button></div>)}
+                <div className="details-subtask-add"><input aria-label="New subtask title" value={detailSubtask} onChange={(event) => setDetailSubtask(event.target.value)} placeholder="Add subtask" /><button type="button" onClick={async () => { const title = detailSubtask.trim(); if (!title) return; await api.createTask(title, selectedDetailsTask.projectId, selectedDetailsTask.sectionId, selectedDetailsTask.id); setDetailSubtask(""); await queryClient.invalidateQueries({ queryKey: taskQueryKey }); }}>Add</button></div>
+              </fieldset>
+              <section className="task-comments"><h3>Comments</h3>
+                {selectedDetailsTask.comments.map((comment) => <article className="task-comment" key={comment.id}>
+                  {editingCommentId === comment.id ? <><textarea aria-label={`Edit comment ${comment.id}`} value={editingCommentBody} onChange={(event) => setEditingCommentBody(event.target.value)} rows={2} /><div><button type="button" onClick={async () => { const comments = selectedDetailsTask.comments.map((item) => item.id === comment.id ? Object.freeze({ ...item, body: editingCommentBody.trim() }) : item); await api.updateTask(selectedDetailsTask.id, { comments }); setEditingCommentId(null); await queryClient.invalidateQueries({ queryKey: taskQueryKey }); }}>Save comment</button><button type="button" onClick={() => setEditingCommentId(null)}>Cancel</button></div></> : <><p>{comment.body}</p><small>{new Date(comment.createdAt).toLocaleString()}</small><div><button type="button" onClick={() => { setEditingCommentId(comment.id); setEditingCommentBody(comment.body); }}>Edit</button><button type="button" className="danger" onClick={async () => { if (!confirmDeletion("Delete this comment?")) return; await api.updateTask(selectedDetailsTask.id, { comments: selectedDetailsTask.comments.filter((item) => item.id !== comment.id) }); await queryClient.invalidateQueries({ queryKey: taskQueryKey }); }}>Delete</button></div></>}
+                </article>)}
+                <label>Add comment<textarea value={detailComment} onChange={(event) => setDetailComment(event.target.value)} rows={2} /></label>
+                <button type="button" disabled={!detailComment.trim()} onClick={async () => { const comments = [...selectedDetailsTask.comments, { id: crypto.randomUUID(), body: detailComment.trim(), createdAt: new Date().toISOString() }]; await api.updateTask(selectedDetailsTask.id, { comments }); setDetailComment(""); await queryClient.invalidateQueries({ queryKey: taskQueryKey }); }}>Add comment</button>
+              </section>
+              <footer><button type="button" onClick={() => setDetailsTaskId(null)}>Cancel</button><button type="submit">Save task</button></footer>
+            </form>
+          </section>
+        </div>
+      ) : null}
     </main>
     </DndContext>
   );
@@ -1111,6 +1169,7 @@ export const ToolsPage = ({ api }: Readonly<{ api: ToolsApi }>) => {
   const [selectedTable, setSelectedTable] = useState("");
   const [sql, setSql] = useState("SELECT * FROM tasks ORDER BY lexical_order;");
   const [result, setResult] = useState<unknown>(Object.freeze({ ready: true }));
+  const [recordsLimit, setRecordsLimit] = useState<"10" | "100" | "all">("10");
   const queryClient = useQueryClient();
 
   const tables = useQuery({
@@ -1137,6 +1196,8 @@ export const ToolsPage = ({ api }: Readonly<{ api: ToolsApi }>) => {
     mutationFn: (nextSql: string) => api.runQuery(nextSql),
     onSuccess: (data) => setResult(data)
   });
+
+  const viewRecords = useMutation({ mutationFn: () => api.listRecords(tableValue, recordsLimit), onSuccess: setResult });
 
   if (!toolsEnabled) {
     return (
@@ -1183,53 +1244,54 @@ export const ToolsPage = ({ api }: Readonly<{ api: ToolsApi }>) => {
       </aside>
       <section className="workspace card shadow-sm tools-panel" aria-label="Database tools">
         <header className="header">
-          <p className="eyebrow">Development tools</p>
-          <h1>Database Tools</h1>
+          <div><p className="eyebrow">Development tools</p><h1>Database Tools</h1><p className="tools-description">Browse table data, run SQL, and maintain the local database.</p></div>
         </header>
 
-        <div className="tools-grid">
-          <label className="input-label" htmlFor="table-select">
-            Table
-          </label>
-          <select id="table-select" value={tableValue} onChange={(event) => setSelectedTable(event.target.value)}>
-            {tableOptions.map((table) => (
-              <option key={table} value={table}>
-                {table}
-              </option>
-            ))}
-          </select>
-          <button type="button" disabled={tableValue.length === 0} onClick={() => clearTable.mutate(tableValue)}>
-            Clear selected table
-          </button>
-          <button type="button" onClick={runAction(api.dropAllTables)}>
-            Drop all tables
-          </button>
-          <button type="button" onClick={runAction(api.migrate)}>
-            Run migrations
-          </button>
-          <button type="button" onClick={runAction(api.clearAllTables)}>
-            Clear all tables
-          </button>
-          <button type="button" onClick={runAction(api.seed)}>
-            Seed test data
-          </button>
-        </div>
+        <section className="card tools-card" aria-label="Browse table records">
+          <div className="card-body">
+            <div className="tools-card-heading"><Database size={20} /><div><h2>Browse table records</h2><p>Select a table and choose how many recent rows to inspect.</p></div></div>
+            <div className="tools-grid">
+              <label className="input-label" htmlFor="table-select">Table</label>
+              <select id="table-select" value={tableValue} onChange={(event) => setSelectedTable(event.target.value)}>
+                {tableOptions.map((table) => <option key={table} value={table}>{table}</option>)}
+              </select>
+              <label className="input-label" htmlFor="record-limit">Rows to view</label>
+              <select id="record-limit" value={recordsLimit} onChange={(event) => setRecordsLimit(event.target.value as "10" | "100" | "all")}>
+                <option value="10">Last 10</option><option value="100">Last 100</option><option value="all">All rows</option>
+              </select>
+              <button type="button" className="btn btn-primary" disabled={tableValue.length === 0 || viewRecords.isPending} onClick={() => viewRecords.mutate()}>{viewRecords.isPending ? "Loading records…" : "View records"}</button>
+              <button type="button" className="btn btn-outline-danger" disabled={tableValue.length === 0} onClick={() => clearTable.mutate(tableValue)}>Clear selected table</button>
+            </div>
+          </div>
+        </section>
+
+        <section className="card tools-card tools-maintenance" aria-label="Database maintenance">
+          <div className="card-body">
+            <div className="tools-card-heading"><Archive size={20} /><div><h2>Database maintenance</h2><p>Run migrations or manage development data.</p></div></div>
+            <div className="tools-maintenance-actions">
+              <button type="button" className="btn btn-outline-secondary" onClick={runAction(api.migrate)}>Run migrations</button>
+              <button type="button" className="btn btn-outline-secondary" onClick={runAction(api.seed)}>Seed test data</button>
+              <button type="button" className="btn btn-outline-danger" onClick={runAction(api.clearAllTables)}>Clear all tables</button>
+              <button type="button" className="btn btn-danger" onClick={runAction(api.dropAllTables)}>Drop all tables</button>
+            </div>
+          </div>
+        </section>
 
         <form
-          className="sql-form"
+          className="sql-form card p-3"
           onSubmit={(event) => {
             event.preventDefault();
             runQuery.mutate(sql);
           }}
         >
           <label className="input-label" htmlFor="sql-query">
-            PostgreSQL query
+            <span><Code2 size={16} aria-hidden="true" /> PostgreSQL query</span>
           </label>
           <textarea id="sql-query" value={sql} onChange={(event) => setSql(event.target.value)} />
           <button type="submit">Run query</button>
         </form>
 
-        <pre className="query-result">{JSON.stringify(result, null, 2)}</pre>
+        <section className="card tools-result-card"><header><h2>Result</h2><span>{runQuery.isPending || viewRecords.isPending ? "Loading" : "Ready"}</span></header><pre className="query-result">{JSON.stringify(result, null, 2)}</pre></section>
       </section>
     </main>
   );
@@ -1378,6 +1440,31 @@ export const SettingsPage = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   );
 };
 
+export const ArchivedProjectsPage = ({ api }: Readonly<{ api: ApplicationApi }>) => {
+  const queryClient = useQueryClient();
+  const [selectedProjectId, setSelectedProjectId] = useState<ProjectId | null>(null);
+  const projects = useQuery({ queryKey: projectQueryKey, queryFn: api.listProjects });
+  const tasks = useQuery({ queryKey: taskQueryKey, queryFn: api.listTasks });
+  const archived = (projects.data ?? []).filter((project) => project.archived);
+  const restore = async (project: Project) => { await api.archiveProject(project.id, false); await queryClient.invalidateQueries({ queryKey: projectQueryKey }); };
+  const remove = async (project: Project) => {
+    if (!window.confirm(`Delete project “${project.title}” and all its tasks?`)) return;
+    await api.deleteProject(project.id);
+    await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+    await queryClient.invalidateQueries({ queryKey: taskQueryKey });
+  };
+  const renderTasks = (nodes: ReadonlyArray<TaskNode>): ReactElement => <ul className="archived-task-tree">{nodes.map((task) => <li key={task.id}><strong>{task.title}</strong>{task.description ? <p>{task.description}</p> : null}<div className="archived-task-meta">{task.dueDate ? <span>Due {task.dueDate}</span> : null}{task.labels.map((label) => <span className="badge text-bg-light" key={label}>{label}</span>)}</div>{task.children.length ? renderTasks(task.children) : null}</li>)}</ul>;
+  const selectedProject = archived.find((project) => project.id === selectedProjectId);
+  const archivedTaskRoots = (tasks.data ?? []).filter((task) => task.projectId === selectedProjectId && task.parentId === null);
+  return <main className="shell app-layout">
+    <aside className="sidebar card shadow-sm" aria-label="Navigation"><div className="sidebar-brand"><span className="brand-mark">T</span><strong>Todoist Clone</strong></div><a className="nav-button nav-link-button" href="/"><Inbox size={16} /> Inbox</a><a className="nav-button nav-link-button active" href="/archived-projects"><Archive size={16} /> Archived projects</a></aside>
+    <section className="workspace card shadow-sm"><h1>Archived projects</h1>
+      {archived.length === 0 ? <p className="empty">No archived projects.</p> : archived.map((project) => <article className="archived-project" key={project.id}><strong>{project.title}</strong><div><button type="button" onClick={() => setSelectedProjectId((current) => current === project.id ? null : project.id)}>{selectedProjectId === project.id ? "Hide tasks" : "View tasks"}</button><button type="button" onClick={() => void restore(project)}>Restore</button><button type="button" className="danger" onClick={() => void remove(project)}>Delete</button></div></article>)}
+      {selectedProject !== undefined ? <section className="archived-task-view" aria-label={`${selectedProject.title} tasks`}><h2>{selectedProject.title} tasks</h2>{tasks.isLoading ? <p>Loading tasks…</p> : archivedTaskRoots.length === 0 ? <p className="empty">This project has no tasks.</p> : renderTasks(archivedTaskRoots)}</section> : null}
+    </section>
+  </main>;
+};
+
 const LoginPage = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const queryClient = useQueryClient();
   const [username, setUsername] = useState("");
@@ -1435,6 +1522,8 @@ const AppRouter = () => {
   if (path.startsWith("/settings")) {
     return <SettingsPage api={api} />;
   }
+
+  if (path.startsWith("/archived-projects")) return <ArchivedProjectsPage api={api} />;
 
   if (path.startsWith("/tools")) {
     return <ToolsPage api={createToolsApi()} />;

@@ -7,6 +7,10 @@ export type Priority = 1 | 2 | 3 | 4;
 export type Task = Readonly<{
   id: TaskId;
   title: string;
+  description: string;
+  dueDate: string | null;
+  labels: ReadonlyArray<string>;
+  comments: ReadonlyArray<Readonly<{ id: string; body: string; createdAt: string }>>;
   completed: boolean;
   priority: Priority;
   parentId: TaskId | null;
@@ -24,6 +28,7 @@ export type TaskNode = Task & Readonly<{
 export type Project = Readonly<{
   id: ProjectId;
   title: string;
+  archived: boolean;
   lexicalOrder: string;
   createdAt: string;
   updatedAt: string;
