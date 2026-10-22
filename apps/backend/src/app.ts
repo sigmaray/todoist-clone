@@ -1,9 +1,13 @@
 import { buildTaskTree } from "@todoist-clone/domain";
+import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
+import { createSessionToken, hashPassword, hashSessionToken, sessionCookieName, sessionLifetimeSeconds, verifyPassword } from "./auth";
 import { createMemoryTaskRepository } from "./repository";
 import type { TaskRepository } from "./repository";
+import { createMemorySettingsRepository, toPublicSettings } from "./settings";
+import type { SettingsRepository } from "./settings";
 import { createToolsRouter } from "./tools";
 
 const prioritySchema = z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]);
@@ -49,6 +53,18 @@ const patchSectionSchema = z.object({
   title: z.string().trim().min(1)
 });
 
+const loginSchema = z.object({
+  username: z.string().trim().min(1).max(64),
+  password: z.string().min(1).max(256)
+});
+
+const updateSettingsSchema = z.object({
+  confirmDelete: z.boolean(),
+  accessMode: z.enum(["anonymous", "password"]),
+  username: z.string().trim().min(1).max(64).nullable().optional(),
+  password: z.string().min(12).max(128).optional()
+});
+
 const parseJson = async (request: Request) => {
   const contentType = request.headers.get("content-type") ?? "";
 
@@ -61,11 +77,129 @@ const parseJson = async (request: Request) => {
 
 export const createApp = (
   repository: TaskRepository = createMemoryTaskRepository(),
-  options: Readonly<{ databaseUrl?: string; mode?: string }> = Object.freeze({})
+  options: Readonly<{ databaseUrl?: string; mode?: string; settingsRepository?: SettingsRepository }> = Object.freeze({})
 ) => {
   const app = new Hono();
+  const settingsRepository = options.settingsRepository ?? createMemorySettingsRepository();
+  const secureCookies = options.mode === "production";
 
   app.use("*", cors());
+
+  app.use("*", async (context, next) => {
+    const path = context.req.path;
+    const method = context.req.method;
+    const publicRoute = (path === "/auth/status" && method === "GET") || (path === "/auth/login" && method === "POST") || (path === "/auth/logout" && method === "POST");
+
+    if (publicRoute || method === "OPTIONS") {
+      await next();
+      return;
+    }
+
+    const settings = await settingsRepository.getSettings();
+
+    if (settings.accessMode === "anonymous") {
+      await next();
+      return;
+    }
+
+    const token = getCookie(context, sessionCookieName);
+    const valid = token === undefined ? false : await settingsRepository.hasSession(hashSessionToken(token), new Date());
+
+    if (!valid) {
+      return context.json({ error: "Authentication required" }, 401);
+    }
+
+    await next();
+  });
+
+  app.get("/auth/status", async (context) => {
+    const settings = await settingsRepository.getSettings();
+    const token = getCookie(context, sessionCookieName);
+    const authenticated = settings.accessMode === "anonymous" || (token !== undefined && (await settingsRepository.hasSession(hashSessionToken(token), new Date())));
+
+    context.header("Cache-Control", "no-store");
+    return context.json({ accessMode: settings.accessMode, authenticated });
+  });
+
+  app.post("/auth/login", async (context) => {
+    const result = loginSchema.safeParse(await parseJson(context.req.raw));
+    const settings = await settingsRepository.getSettings();
+
+    if (!result.success || settings.accessMode !== "password" || settings.username === null || settings.passwordHash === null) {
+      return context.json({ error: "Invalid username or password" }, 401);
+    }
+
+    const validPassword = await verifyPassword(result.data.password, settings.passwordHash);
+
+    if (result.data.username !== settings.username || !validPassword) {
+      return context.json({ error: "Invalid username or password" }, 401);
+    }
+
+    const token = createSessionToken();
+    const tokenHash = hashSessionToken(token);
+    const expiresAt = new Date(Date.now() + sessionLifetimeSeconds * 1000);
+
+    await settingsRepository.saveSession(tokenHash, expiresAt);
+    setCookie(context, sessionCookieName, token, {
+      httpOnly: true,
+      secure: secureCookies,
+      sameSite: "Lax",
+      path: "/",
+      maxAge: sessionLifetimeSeconds
+    });
+    context.header("Cache-Control", "no-store");
+
+    return context.json({ authenticated: true });
+  });
+
+  app.post("/auth/logout", async (context) => {
+    const token = getCookie(context, sessionCookieName);
+
+    if (token !== undefined) {
+      await settingsRepository.deleteSession(hashSessionToken(token));
+    }
+
+    deleteCookie(context, sessionCookieName, { httpOnly: true, secure: secureCookies, sameSite: "Lax", path: "/" });
+    return context.json({ authenticated: false });
+  });
+
+  app.get("/settings", async (context) => {
+    context.header("Cache-Control", "no-store");
+    return context.json({ settings: toPublicSettings(await settingsRepository.getSettings()) });
+  });
+
+  app.put("/settings", async (context) => {
+    const result = updateSettingsSchema.safeParse(await parseJson(context.req.raw));
+
+    if (!result.success) {
+      return context.json({ error: "Invalid settings" }, 400);
+    }
+
+    const current = await settingsRepository.getSettings();
+    const username = result.data.username === undefined ? current.username : result.data.username;
+    const passwordHash = result.data.password === undefined ? current.passwordHash : await hashPassword(result.data.password);
+
+    if (result.data.accessMode === "password" && (username === null || passwordHash === null)) {
+      return context.json({ error: "Set a username and a password before enabling login" }, 400);
+    }
+
+    const settings = Object.freeze({
+      confirmDelete: result.data.confirmDelete,
+      accessMode: result.data.accessMode,
+      username,
+      passwordHash
+    });
+    const credentialsChanged = username !== current.username || passwordHash !== current.passwordHash;
+
+    await settingsRepository.saveSettings(settings);
+
+    if (settings.accessMode === "anonymous" || credentialsChanged) {
+      await settingsRepository.deleteAllSessions();
+    }
+
+    context.header("Cache-Control", "no-store");
+    return context.json({ settings: toPublicSettings(settings) });
+  });
 
   if (options.databaseUrl !== undefined) {
     app.route("/tools-api", createToolsRouter(options.databaseUrl, options.mode ?? "development"));

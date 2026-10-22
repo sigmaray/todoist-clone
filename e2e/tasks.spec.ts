@@ -1,6 +1,10 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
+test.beforeEach(async ({ page }) => {
+  page.on("dialog", (dialog) => dialog.accept());
+});
+
 const createTask = (page: Page) => async (title: string) => {
   await page.getByLabel(/Task title/).fill(title);
   await page.getByRole("button", { name: "Add task" }).click();
@@ -151,6 +155,14 @@ test("creates a task in the browser", async ({ page }, testInfo) => {
   await page.getByRole("button", { name: `Delete task ${editedTitle}` }).click();
 
   await expect(page.getByText(editedTitle)).not.toBeVisible();
+});
+
+test("opens settings with deletion confirmation enabled by default", async ({ page }) => {
+  await page.goto("/settings");
+
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  await expect(page.getByRole("checkbox", { name: /Ask for confirmation before deleting/ })).toBeChecked();
+  await expect(page.getByRole("radio", { name: /Anonymous access/ })).toBeChecked();
 });
 
 test("creates projects, sections, subtasks, and exports markdown", async ({ context, page }, testInfo) => {

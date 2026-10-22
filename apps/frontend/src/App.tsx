@@ -12,18 +12,20 @@ import {
 import type { Project, ProjectId, Section, SectionId, Task, TaskId, TaskNode } from "@todoist-clone/domain";
 import clsx from "clsx";
 import JSZip from "jszip";
-import { Archive, ClipboardCopy, Code2, Database, Download, Edit3, Eye, Inbox, Plus, Trash2, X } from "lucide-react";
+import { Archive, ClipboardCopy, Code2, Database, Download, Edit3, Eye, Inbox, KeyRound, Plus, Settings, Trash2, X } from "lucide-react";
 import type { DragEvent, FormEvent, KeyboardEvent, ReactElement } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import "./vendor/bootstrap.min.css";
 import { createTaskApi, createToolsApi } from "./api";
-import type { TaskApi, ToolsApi } from "./api";
+import type { AppSettings, ApplicationApi, ToolsApi } from "./api";
 import "./App.css";
 
 const taskQueryKey = Object.freeze(["tasks"]);
 const projectQueryKey = Object.freeze(["projects"]);
 const sectionQueryKey = Object.freeze(["sections"]);
 const tablesQueryKey = Object.freeze(["tools", "tables"]);
+const settingsQueryKey = Object.freeze(["app-settings"]);
+const authStatusQueryKey = Object.freeze(["auth-status"]);
 const toolsEnabled = import.meta.env.DEV || import.meta.env.MODE === "test";
 
 type DragPlacement = "before" | "inside" | "after" | "outdent";
@@ -364,7 +366,7 @@ const downloadBlob = (blob: Blob, filename: string) => {
   URL.revokeObjectURL(url);
 };
 
-export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
+export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const [title, setTitle] = useState("");
   const [projectTitle, setProjectTitle] = useState("");
   const [sectionTitle, setSectionTitle] = useState("");
@@ -405,6 +407,13 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
     queryKey: sectionQueryKey,
     queryFn: api.listSections
   });
+
+  const settings = useQuery({
+    queryKey: settingsQueryKey,
+    queryFn: api.getSettings
+  });
+
+  const confirmDeletion = (message: string) => settings.data?.confirmDelete === false || window.confirm(message);
 
   const createMutation = useMutation({
     mutationFn: (nextTitle: string) => api.createTask(nextTitle, targetProjectId, targetSectionId, null),
@@ -450,6 +459,12 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
     }
   });
 
+  const requestProjectDelete = (project: Project) => {
+    if (confirmDeletion(`Delete project “${project.title}” and all its tasks?`)) {
+      deleteProjectMutation.mutate(project);
+    }
+  };
+
   const createSectionMutation = useMutation({
     mutationFn: (nextTitle: string) => api.createSection(nextTitle, null),
     onSuccess: (section) => {
@@ -474,6 +489,12 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
       await queryClient.invalidateQueries({ queryKey: taskQueryKey });
     }
   });
+
+  const requestSectionDelete = (section: Section) => {
+    if (confirmDeletion(`Delete section “${section.title}”?`)) {
+      deleteSectionMutation.mutate(section);
+    }
+  };
 
   const toggleMutation = useMutation({
     mutationFn: (task: TaskNode) => api.patchTask(task.id, !task.completed),
@@ -527,6 +548,12 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
       await queryClient.invalidateQueries({ queryKey: taskQueryKey });
     }
   });
+
+  const requestTaskDelete = (task: TaskNode) => {
+    if (confirmDeletion(`Delete task “${task.title}” and its subtasks?`)) {
+      deleteMutation.mutate(task);
+    }
+  };
 
   const moveMutation = useMutation({
     mutationFn: (placement: MoveInput) =>
@@ -731,7 +758,7 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
     startEditing,
     startSubtask,
     startDragging,
-    deleteTask: deleteMutation.mutate,
+    deleteTask: requestTaskDelete,
     submitSubtask,
     submitEdit,
     cancelSubtask: () => {
@@ -824,6 +851,10 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
             Tools
           </a>
         ) : null}
+        <a className="nav-button nav-link-button" href="/settings">
+          <Settings size={16} aria-hidden="true" />
+          Settings
+        </a>
         <div className="sidebar-group">
           <h2>My Projects</h2>
           {allProjects.map((project) =>
@@ -873,7 +904,7 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
                   type="button"
                   className="danger"
                   aria-label={`Delete project ${project.title}`}
-                  onClick={() => deleteProjectMutation.mutate(project)}
+                  onClick={() => requestProjectDelete(project)}
                 >
                   <Trash2 size={14} aria-hidden="true" />
                 </button>
@@ -1010,7 +1041,7 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
                             type="button"
                             className="danger"
                             aria-label={`Delete section ${section.title}`}
-                            onClick={() => deleteSectionMutation.mutate(section)}
+                            onClick={() => requestSectionDelete(section)}
                           >
                             <Trash2 size={14} aria-hidden="true" />
                             Delete
@@ -1145,6 +1176,10 @@ export const ToolsPage = ({ api }: Readonly<{ api: ToolsApi }>) => {
           <Code2 size={16} aria-hidden="true" />
           Tools
         </a>
+        <a className="nav-button nav-link-button" href="/settings">
+          <Settings size={16} aria-hidden="true" />
+          Settings
+        </a>
       </aside>
       <section className="workspace card shadow-sm tools-panel" aria-label="Database tools">
         <header className="header">
@@ -1200,6 +1235,214 @@ export const ToolsPage = ({ api }: Readonly<{ api: ToolsApi }>) => {
   );
 };
 
+export const SettingsPage = ({ api }: Readonly<{ api: ApplicationApi }>) => {
+  const queryClient = useQueryClient();
+  const settings = useQuery({ queryKey: settingsQueryKey, queryFn: api.getSettings });
+  const authStatus = useQuery({ queryKey: authStatusQueryKey, queryFn: api.getAuthStatus });
+  const [confirmDelete, setConfirmDelete] = useState(true);
+  const [accessMode, setAccessMode] = useState<AppSettings["accessMode"]>("anonymous");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+
+  useEffect(() => {
+    if (settings.data !== undefined) {
+      setConfirmDelete(settings.data.confirmDelete);
+      setAccessMode(settings.data.accessMode);
+      setUsername(settings.data.username ?? "");
+    }
+  }, [settings.data]);
+
+  const saveSettings = useMutation({
+    mutationFn: api.updateSettings,
+    onSuccess: async (nextSettings) => {
+      queryClient.setQueryData(settingsQueryKey, nextSettings);
+      setPassword("");
+      await queryClient.invalidateQueries({ queryKey: authStatusQueryKey });
+    }
+  });
+
+  const logOut = async () => {
+    await api.logout();
+    await queryClient.invalidateQueries({ queryKey: authStatusQueryKey });
+  };
+
+  return (
+    <main className="shell app-layout">
+      <aside className="sidebar card shadow-sm" aria-label="Navigation">
+        <div className="sidebar-brand">
+          <span className="brand-mark">T</span>
+          <strong>Todoist Clone</strong>
+        </div>
+        <a className="nav-button nav-link-button" href="/">
+          <Inbox size={16} aria-hidden="true" />
+          Inbox
+        </a>
+        {toolsEnabled ? (
+          <a className="nav-button nav-link-button" href="/tools">
+            <Code2 size={16} aria-hidden="true" />
+            Tools
+          </a>
+        ) : null}
+        <a className="nav-button nav-link-button active" href="/settings">
+          <Settings size={16} aria-hidden="true" />
+          Settings
+        </a>
+      </aside>
+      <section className="workspace card shadow-sm settings-panel" aria-label="Settings">
+        <header className="header">
+          <h1>Settings</h1>
+          <p className="settings-intro">Manage confirmations and access to your task workspace.</p>
+        </header>
+
+        {settings.isLoading ? <p className="muted">Loading settings…</p> : null}
+        {settings.isError ? <p className="error">Unable to load settings.</p> : null}
+        {settings.data !== undefined ? (
+          <form
+            className="settings-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              saveSettings.mutate({
+                confirmDelete,
+                accessMode,
+                username: username.trim() || null,
+                ...(password.length > 0 ? { password } : {})
+              });
+            }}
+          >
+            <fieldset className="settings-group">
+              <legend>Deletion</legend>
+              <label className="settings-checkbox">
+                <input type="checkbox" checked={confirmDelete} onChange={(event) => setConfirmDelete(event.target.checked)} />
+                Ask for confirmation before deleting tasks, projects, or sections
+              </label>
+              <p className="settings-help">Enabled by default. This setting applies to all delete actions.</p>
+            </fieldset>
+
+            <fieldset className="settings-group">
+              <legend>Workspace access</legend>
+              <label className="settings-choice">
+                <input type="radio" name="access-mode" value="anonymous" checked={accessMode === "anonymous"} onChange={() => setAccessMode("anonymous")} />
+                <span>
+                  <strong>Anonymous access</strong>
+                  <small>Anyone who can reach this app can use it.</small>
+                </span>
+              </label>
+              <label className="settings-choice">
+                <input type="radio" name="access-mode" value="password" checked={accessMode === "password"} onChange={() => setAccessMode("password")} />
+                <span>
+                  <strong>Require login and password</strong>
+                  <small>Protect task data and tools behind a session.</small>
+                </span>
+              </label>
+
+              {accessMode === "password" ? (
+                <div className="settings-credentials">
+                  <label>
+                    Login
+                    <input autoComplete="username" maxLength={64} required value={username} onChange={(event) => setUsername(event.target.value)} />
+                  </label>
+                  <label>
+                    {settings.data.username === null ? "Password" : "New password"}
+                    <input
+                      autoComplete="new-password"
+                      minLength={12}
+                      maxLength={128}
+                      required={settings.data.username === null}
+                      type="password"
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                    />
+                  </label>
+                  <p className="settings-help">Use at least 12 characters. Leave the password blank to keep the current one.</p>
+                </div>
+              ) : null}
+            </fieldset>
+
+            {saveSettings.isError ? <p className="error" role="alert">Unable to save settings. Check the login and password requirements.</p> : null}
+            {saveSettings.isSuccess ? <p className="settings-success" role="status">Settings saved.</p> : null}
+            <div className="settings-actions">
+              <button className="settings-save" type="submit" disabled={saveSettings.isPending}>
+                Save settings
+              </button>
+              {authStatus.data?.accessMode === "password" && authStatus.data.authenticated ? (
+                <button className="settings-logout" type="button" onClick={() => void logOut()}>
+                  <KeyRound size={16} aria-hidden="true" />
+                  Log out
+                </button>
+              ) : null}
+            </div>
+          </form>
+        ) : null}
+      </section>
+    </main>
+  );
+};
+
+const LoginPage = ({ api }: Readonly<{ api: ApplicationApi }>) => {
+  const queryClient = useQueryClient();
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const login = useMutation({
+    mutationFn: () => api.login(username, password),
+    onSuccess: async () => {
+      setPassword("");
+      await queryClient.invalidateQueries({ queryKey: authStatusQueryKey });
+    }
+  });
+
+  return (
+    <main className="shell auth-shell">
+      <section className="workspace card auth-panel" aria-label="Sign in">
+        <div className="sidebar-brand">
+          <span className="brand-mark">T</span>
+          <strong>Todoist Clone</strong>
+        </div>
+        <h1>Sign in</h1>
+        <form className="auth-form" onSubmit={(event) => { event.preventDefault(); login.mutate(); }}>
+          <label>
+            Login
+            <input autoComplete="username" required value={username} onChange={(event) => setUsername(event.target.value)} />
+          </label>
+          <label>
+            Password
+            <input autoComplete="current-password" required type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
+          </label>
+          {login.isError ? <p className="error" role="alert">Login or password is incorrect.</p> : null}
+          <button className="settings-save" type="submit" disabled={login.isPending}>Sign in</button>
+        </form>
+      </section>
+    </main>
+  );
+};
+
+const AppRouter = () => {
+  const api = createTaskApi();
+  const authStatus = useQuery({ queryKey: authStatusQueryKey, queryFn: api.getAuthStatus });
+  const path = window.location.pathname;
+
+  if (authStatus.isLoading) {
+    return <main className="auth-loading">Loading…</main>;
+  }
+
+  if (authStatus.isError || authStatus.data === undefined) {
+    return <main className="auth-loading error">Unable to check workspace access.</main>;
+  }
+
+  if (authStatus.data.accessMode === "password" && !authStatus.data.authenticated) {
+    return <LoginPage api={api} />;
+  }
+
+  if (path.startsWith("/settings")) {
+    return <SettingsPage api={api} />;
+  }
+
+  if (path.startsWith("/tools")) {
+    return <ToolsPage api={createToolsApi()} />;
+  }
+
+  return <TaskApp api={api} />;
+};
+
 export const createQueryClient = () =>
   new QueryClient({
     defaultOptions: {
@@ -1209,12 +1452,4 @@ export const createQueryClient = () =>
     }
   });
 
-const renderRoute = () => {
-  if (window.location.pathname.startsWith("/tools")) {
-    return <ToolsPage api={createToolsApi()} />;
-  }
-
-  return <TaskApp api={createTaskApi()} />;
-};
-
-export const App = () => <QueryClientProvider client={createQueryClient()}>{renderRoute()}</QueryClientProvider>;
+export const App = () => <QueryClientProvider client={createQueryClient()}><AppRouter /></QueryClientProvider>;

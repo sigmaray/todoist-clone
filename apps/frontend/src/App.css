@@ -1284,6 +1284,166 @@ body {
   font-size: 16px;
 }
 
+.settings-intro {
+  margin: -7px 0 22px;
+  color: #777;
+}
+
+.settings-form {
+  display: grid;
+  gap: 18px;
+}
+
+.settings-group {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  border-bottom: 1px solid #eeeae7;
+  padding: 0 0 18px;
+}
+
+.settings-group legend {
+  float: none;
+  width: auto;
+  margin: 0 0 2px;
+  padding: 0;
+  color: #303030;
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.settings-checkbox,
+.settings-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.settings-checkbox input,
+.settings-choice input {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-top: 4px;
+  accent-color: #d34b38;
+}
+
+.settings-choice > span {
+  display: grid;
+  gap: 3px;
+}
+
+.settings-choice small,
+.settings-help {
+  color: #777;
+  font-size: 14px;
+}
+
+.settings-help {
+  margin: -4px 0 0 26px;
+}
+
+.settings-credentials,
+.auth-form {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-credentials > label,
+.auth-form > label {
+  display: grid;
+  gap: 6px;
+}
+
+.settings-credentials input,
+.auth-form input {
+  width: 100%;
+  min-height: 42px;
+  box-sizing: border-box;
+  border: 1px solid #ddd9d5;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font: inherit;
+}
+
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.settings-save,
+.settings-logout {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.settings-save {
+  color: #fff;
+  background: #d34b38;
+}
+
+.settings-save:hover:not(:disabled) {
+  background: #b83f28;
+}
+
+.settings-save:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.settings-logout {
+  border: 1px solid #e7e5e3;
+  color: #444;
+  background: #fff;
+}
+
+.settings-success {
+  margin: 0;
+  color: #287544;
+}
+
+.auth-shell {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+  background: #fbfaf9;
+}
+
+.workspace.auth-panel {
+  width: min(420px, 100%);
+  max-width: 420px;
+  margin: 0;
+  border: 1px solid #eeeae7;
+  border-radius: 10px;
+  padding: 28px;
+  background: #fff;
+  box-shadow: 0 12px 40px rgb(30 24 20 / 0.08) !important;
+}
+
+.auth-panel h1 {
+  margin: 22px 0 18px;
+  font-size: 24px;
+}
+
+.auth-loading {
+  padding: 48px;
+  color: #555;
+  font-size: 16px;
+}
+
 @media (max-width: 700px) {
   .shell.app-layout {
     grid-template-columns: 1fr;

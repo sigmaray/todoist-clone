@@ -1,5 +1,18 @@
 import { boolean, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
+export const appSettings = pgTable("app_settings", {
+  id: text("id").primaryKey(),
+  confirmDelete: boolean("confirm_delete").notNull().default(true),
+  accessMode: text("access_mode").notNull().default("anonymous"),
+  username: text("username"),
+  passwordHash: text("password_hash")
+});
+
+export const sessions = pgTable("sessions", {
+  tokenHash: text("token_hash").primaryKey(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull()
+});
+
 export const projects = pgTable("projects", {
   id: text("id").primaryKey(),
   title: text("title").notNull(),

@@ -34,6 +34,32 @@ export type ToolsApi = Readonly<{
   runQuery: (sql: string) => Promise<unknown>;
 }>;
 
+export type AppSettings = Readonly<{
+  confirmDelete: boolean;
+  accessMode: "anonymous" | "password";
+  username: string | null;
+}>;
+
+export type AuthStatus = Readonly<{
+  accessMode: "anonymous" | "password";
+  authenticated: boolean;
+}>;
+
+export type SettingsUpdate = Readonly<{
+  confirmDelete: boolean;
+  accessMode: "anonymous" | "password";
+  username: string | null;
+  password?: string;
+}>;
+
+export type ApplicationApi = TaskApi & Readonly<{
+  getSettings: () => Promise<AppSettings>;
+  updateSettings: (settings: SettingsUpdate) => Promise<AppSettings>;
+  getAuthStatus: () => Promise<AuthStatus>;
+  login: (username: string, password: string) => Promise<void>;
+  logout: () => Promise<void>;
+}>;
+
 const readJson = async <T>(response: Response): Promise<T> => {
   if (!response.ok) {
     throw new Error(`Request failed with ${response.status}`);
@@ -42,8 +68,29 @@ const readJson = async <T>(response: Response): Promise<T> => {
   return response.json() as Promise<T>;
 };
 
-export const createTaskApi = (baseUrl = ""): TaskApi =>
+export const createTaskApi = (baseUrl = ""): ApplicationApi =>
   Object.freeze({
+    getSettings: async () => {
+      const data = await readJson<{ settings: AppSettings }>(await fetch(`${baseUrl}/settings`));
+
+      return data.settings;
+    },
+    updateSettings: async (settings) => {
+      const data = await readJson<{ settings: AppSettings }>(await fetch(`${baseUrl}/settings`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settings)
+      }));
+
+      return data.settings;
+    },
+    getAuthStatus: async () => readJson<AuthStatus>(await fetch(`${baseUrl}/auth/status`)),
+    login: async (username, password) => {
+      await postJson(`${baseUrl}/auth/login`, { username, password });
+    },
+    logout: async () => {
+      await postJson(`${baseUrl}/auth/logout`);
+    },
     listTasks: async () => {
       const data = await readJson<{ tree: ReadonlyArray<TaskNode> }>(await fetch(`${baseUrl}/tasks`));
 

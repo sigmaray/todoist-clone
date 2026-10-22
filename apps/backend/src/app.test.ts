@@ -3,6 +3,8 @@ import { createServer } from "node:http";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createApp } from "./app";
+import { createMemorySettingsRepository } from "./settings";
+import { createMemoryTaskRepository } from "./repository";
 
 const createTestServer = () => createServer(getRequestListener(createApp().fetch));
 
@@ -173,5 +175,50 @@ describe("POST /tasks", () => {
     const finalOrder = await agent.get("/tasks").expect(200);
 
     expect(finalOrder.body.tree.map((task: { id: string }) => task.id)).toEqual([first.id, second.id, third.id]);
+  });
+});
+
+describe("settings and session authentication", () => {
+  it("defaults to delete confirmations and allows updating that preference", async () => {
+    const settingsRepository = createMemorySettingsRepository();
+    const server = createServer(getRequestListener(createApp(createMemoryTaskRepository(), { settingsRepository }).fetch));
+    const agent = request.agent(server);
+
+    await agent.get("/settings").expect(200).expect(({ body }) => {
+      expect(body.settings).toEqual({ confirmDelete: true, accessMode: "anonymous", username: null });
+    });
+    await agent.put("/settings").send({ confirmDelete: false, accessMode: "anonymous", username: null }).expect(200);
+    await agent.get("/settings").expect(200).expect(({ body }) => expect(body.settings.confirmDelete).toBe(false));
+  });
+
+  it("protects app routes with an HttpOnly session cookie when password access is enabled", async () => {
+    const settingsRepository = createMemorySettingsRepository();
+    const server = createServer(getRequestListener(createApp(createMemoryTaskRepository(), { settingsRepository }).fetch));
+    const agent = request.agent(server);
+
+    await agent
+      .put("/settings")
+      .send({ confirmDelete: true, accessMode: "password", username: "owner", password: "a-long-test-password" })
+      .expect(200);
+    await agent.get("/tasks").expect(401);
+    await agent.post("/auth/login").send({ username: "owner", password: "wrong-password" }).expect(401);
+
+    const login = await agent.post("/auth/login").send({ username: "owner", password: "a-long-test-password" }).expect(200);
+    expect(login.headers["set-cookie"][0]).toMatch(/HttpOnly/);
+    expect(login.headers["set-cookie"][0]).toMatch(/SameSite=Lax/i);
+    await agent.get("/tasks").expect(200);
+    await agent.get("/settings").expect(200);
+    await agent.post("/auth/logout").expect(200);
+    await agent.get("/tasks").expect(401);
+  });
+
+  it("requires a sufficiently long password before enabling login", async () => {
+    const settingsRepository = createMemorySettingsRepository();
+    const server = createServer(getRequestListener(createApp(createMemoryTaskRepository(), { settingsRepository }).fetch));
+
+    await request(server)
+      .put("/settings")
+      .send({ confirmDelete: true, accessMode: "password", username: "owner", password: "short" })
+      .expect(400);
   });
 });

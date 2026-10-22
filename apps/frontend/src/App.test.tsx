@@ -2,10 +2,10 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import type { Project, Section, Task, TaskNode } from "@todoist-clone/domain";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { createQueryClient, TaskApp, ToolsPage } from "./App";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createQueryClient, SettingsPage, TaskApp, ToolsPage } from "./App";
 import { createTaskApi } from "./api";
-import type { TaskApi, ToolsApi } from "./api";
+import type { ApplicationApi, ToolsApi } from "./api";
 
 const task = (values: Partial<TaskNode> & Pick<TaskNode, "id" | "title">): TaskNode =>
   Object.freeze({
@@ -38,15 +38,20 @@ const section = (values: Partial<Section> & Pick<Section, "id" | "title">): Sect
     ...values
   });
 
-const renderApp = (api: TaskApi) =>
+const renderApp = (api: ApplicationApi) =>
   render(
     <QueryClientProvider client={createQueryClient()}>
       <TaskApp api={api} />
     </QueryClientProvider>
   );
 
-const baseApi = (tasks: ReadonlyArray<TaskNode>): TaskApi =>
+const baseApi = (tasks: ReadonlyArray<TaskNode>): ApplicationApi =>
   Object.freeze({
+    getSettings: async () => Object.freeze({ confirmDelete: true, accessMode: "anonymous" as const, username: null }),
+    updateSettings: async (settings) => Object.freeze({ confirmDelete: settings.confirmDelete, accessMode: settings.accessMode, username: settings.username }),
+    getAuthStatus: async () => Object.freeze({ accessMode: "anonymous" as const, authenticated: true }),
+    login: async () => undefined,
+    logout: async () => undefined,
     listTasks: async () => tasks,
     listProjects: async () => Object.freeze([]),
     createProject: async (title) =>
@@ -134,6 +139,11 @@ const placePointer = (row: Element, top = 0) => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+beforeEach(() => {
+  vi.spyOn(window, "confirm").mockReturnValue(true);
 });
 
 describe("TaskApp", () => {
@@ -494,6 +504,35 @@ describe("TaskApp", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Delete task Plan MVP" }));
 
+    expect(window.confirm).toHaveBeenCalledWith('Delete task “Plan MVP” and its subtasks?');
+    await waitFor(() => expect(deleteTask).toHaveBeenCalledWith("1"));
+  });
+
+  it("does not delete when the confirmation is declined", async () => {
+    const deleteTask = vi.fn(async () => undefined);
+    vi.mocked(window.confirm).mockReturnValue(false);
+
+    renderApp(Object.freeze({ ...baseApi(Object.freeze([task({ id: "1", title: "Plan MVP" })])), deleteTask }));
+    await screen.findByText("Plan MVP");
+    await userEvent.click(screen.getByRole("button", { name: "Delete task Plan MVP" }));
+
+    expect(window.confirm).toHaveBeenCalled();
+    expect(deleteTask).not.toHaveBeenCalled();
+  });
+
+  it("skips delete confirmation when the preference is disabled", async () => {
+    const deleteTask = vi.fn(async () => undefined);
+    const api = Object.freeze({
+      ...baseApi(Object.freeze([task({ id: "1", title: "Plan MVP" })])),
+      getSettings: async () => Object.freeze({ confirmDelete: false, accessMode: "anonymous" as const, username: null }),
+      deleteTask
+    });
+
+    renderApp(api);
+    await screen.findByText("Plan MVP");
+    await userEvent.click(screen.getByRole("button", { name: "Delete task Plan MVP" }));
+
+    expect(window.confirm).not.toHaveBeenCalled();
     await waitFor(() => expect(deleteTask).toHaveBeenCalledWith("1"));
   });
 
@@ -609,6 +648,37 @@ describe("ToolsPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Run query" }));
 
     await waitFor(() => expect(runQuery).toHaveBeenCalledWith("SELECT 1;"));
+  });
+});
+
+describe("SettingsPage", () => {
+  it("saves deletion and login settings", async () => {
+    const updateSettings = vi.fn(async (settings: Parameters<ApplicationApi["updateSettings"]>[0]) =>
+      Object.freeze({ confirmDelete: settings.confirmDelete, accessMode: settings.accessMode, username: settings.username })
+    );
+    const api = Object.freeze({ ...baseApi(Object.freeze([])), updateSettings });
+
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <SettingsPage api={api} />
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
+    expect(await screen.findByRole("checkbox", { name: /Ask for confirmation/ })).toBeChecked();
+    await userEvent.click(screen.getByRole("checkbox", { name: /Ask for confirmation/ }));
+    await userEvent.click(screen.getByRole("radio", { name: /Require login and password/ }));
+    await userEvent.type(screen.getByLabelText("Login"), "owner");
+    await userEvent.type(screen.getByLabelText("Password"), "a-long-test-password");
+    await userEvent.click(screen.getByRole("button", { name: "Save settings" }));
+
+    await waitFor(() => expect(updateSettings).toHaveBeenCalled());
+    expect(updateSettings.mock.calls[0]?.[0]).toEqual({
+        confirmDelete: false,
+        accessMode: "password",
+        username: "owner",
+        password: "a-long-test-password"
+    });
   });
 });
 

@@ -21,7 +21,11 @@ const quoteIdentifier = (name: string) => {
   return `"${name}"`;
 };
 
-const migrationFile = new URL("../drizzle/0000_create_tasks.sql", import.meta.url);
+const migrationFiles = Object.freeze([
+  new URL("../drizzle/0000_create_tasks.sql", import.meta.url),
+  new URL("../drizzle/0001_settings_auth.sql", import.meta.url)
+]);
+const protectedTables = Object.freeze(["app_settings", "sessions"]);
 
 const seedTasks = Object.freeze([
   Object.freeze({
@@ -60,13 +64,17 @@ const listTables = async (sql: postgres.Sql) =>
   `;
 
 const clearTable = async (sql: postgres.Sql, table: string) => {
+  if (protectedTables.includes(table)) {
+    throw new Error("Application settings and session tables cannot be cleared from Tools");
+  }
+
   await sql.unsafe(`TRUNCATE TABLE ${quoteIdentifier(table)} RESTART IDENTITY CASCADE`);
 
   return Object.freeze({ table });
 };
 
 const clearAllTables = async (sql: postgres.Sql) => {
-  const tables = await listTables(sql);
+  const tables = (await listTables(sql)).filter((table) => !protectedTables.includes(table.table_name));
 
   await Promise.all(tables.map((table) => clearTable(sql, table.table_name)));
 
@@ -78,7 +86,11 @@ const dropAllTables = async (sql: postgres.Sql) => {
     DO $$
     DECLARE item RECORD;
     BEGIN
-      FOR item IN (SELECT tablename FROM pg_tables WHERE schemaname = current_schema()) LOOP
+      FOR item IN (
+        SELECT tablename FROM pg_tables
+        WHERE schemaname = current_schema()
+          AND tablename NOT IN ('app_settings', 'sessions')
+      ) LOOP
         EXECUTE format('DROP TABLE IF EXISTS %I CASCADE', item.tablename);
       END LOOP;
     END $$;
@@ -86,9 +98,7 @@ const dropAllTables = async (sql: postgres.Sql) => {
 };
 
 const migrate = async (sql: postgres.Sql) => {
-  const migrationSql = await readFile(migrationFile, "utf8");
-
-  await sql.unsafe(migrationSql);
+  await Promise.all(migrationFiles.map(async (migrationFile) => sql.unsafe(await readFile(migrationFile, "utf8"))));
 };
 
 const seed = async (sql: postgres.Sql) => {
@@ -136,6 +146,10 @@ export const createToolsRouter = (databaseUrl: string, mode: string) => {
 
     if (!result.success) {
       return context.json({ error: "Invalid table payload" }, 400);
+    }
+
+    if (protectedTables.includes(result.data.table)) {
+      return context.json({ error: "Cannot clear protected application tables" }, 403);
     }
 
     const cleared = await clearTable(sql, result.data.table);
