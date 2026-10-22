@@ -387,6 +387,41 @@ describe("TaskApp", () => {
     await waitFor(() => expect(menu).not.toHaveAttribute("open"));
   });
 
+  it("opens a duplicated project and saves its description independently", async () => {
+    let projects: ReadonlyArray<Project> = Object.freeze([project({ id: "source", title: "Source", description: "Original notes" })]);
+    const updateProject = vi.fn(async (id: string, patch: Readonly<{ description?: string }>): Promise<Project> => {
+      const existing = projects.find((item) => item.id === id);
+      if (existing === undefined) throw new Error("Unknown project");
+      const updated = project({ ...existing, ...patch });
+      projects = Object.freeze(projects.map((item) => item.id === id ? updated : item));
+      return updated;
+    });
+    const duplicateProject = vi.fn(async (id: string): Promise<Project> => {
+      const source = projects.find((item) => item.id === id);
+      if (source === undefined) throw new Error("Unknown project");
+      const duplicate = project({ ...source, id: "source-copy", title: "Source copy" });
+      projects = Object.freeze([...projects, duplicate]);
+      return duplicate;
+    });
+    renderApp(Object.freeze({ ...baseApi(Object.freeze([])), listProjects: async () => projects, updateProject, duplicateProject }));
+
+    await userEvent.click(await screen.findByRole("button", { name: /^Source$/ }));
+    await userEvent.click(screen.getByLabelText("Project menu Source"));
+    await userEvent.click(screen.getByRole("button", { name: /^Duplicate$/ }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Source copy" })).toBeInTheDocument());
+    expect(screen.getByText("Original notes")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Edit description" }));
+    await userEvent.clear(screen.getByLabelText("Scope description"));
+    await userEvent.type(screen.getByLabelText("Scope description"), "Copy notes only");
+    await userEvent.click(screen.getByRole("button", { name: /^Save$/ }));
+    await waitFor(() => expect(screen.getByText("Copy notes only")).toBeInTheDocument());
+    expect(updateProject).toHaveBeenCalledWith("source-copy", expect.objectContaining({ description: "Copy notes only" }));
+
+    await userEvent.click(screen.getByRole("button", { name: /^Source$/ }));
+    expect(await screen.findByText("Original notes")).toBeInTheDocument();
+    expect(screen.queryByText("Copy notes only")).not.toBeInTheDocument();
+  });
+
   it("creates inbox sections and moves inbox tasks into them", async () => {
     let sections = Object.freeze([] as ReadonlyArray<Section>);
     const moveTask = vi.fn(async (id: string, projectId: string | null, sectionId: string | null, parentId: string | null): Promise<Task> =>

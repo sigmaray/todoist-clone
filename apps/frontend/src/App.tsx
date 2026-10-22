@@ -659,6 +659,10 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const duplicateProjectMutation = useMutation({
     mutationFn: api.duplicateProject,
     onSuccess: async (project) => {
+      setTargetProjectId(project.id);
+      setTargetSectionId(null);
+      window.history.pushState({}, "", `/?project=${encodeURIComponent(project.id)}`);
+      setCurrentPath("/");
       queryClient.setQueryData(projectQueryKey, (current: ReadonlyArray<Project> | undefined) => appendById(current, project));
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: projectQueryKey }),

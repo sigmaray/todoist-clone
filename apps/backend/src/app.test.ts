@@ -142,6 +142,42 @@ describe("POST /tasks", () => {
     expect(tasks.body.tree).toEqual([]);
   });
 
+  it("duplicates project descriptions independently and remaps sections and task hierarchy", async () => {
+    const agent = request(createTestServer());
+    const source = (await agent.post("/projects").send({ title: "Source" }).expect(201)).body.project;
+    await agent.patch(`/projects/${source.id}`).send({ description: "Original notes" }).expect(200);
+    const section = (await agent.post("/sections").send({ title: "Milestone", projectId: source.id }).expect(201)).body.section;
+    const parent = (await agent.post("/tasks").send({ title: "Parent", projectId: source.id, sectionId: section.id }).expect(201)).body.task;
+    await agent.post("/tasks").send({ title: "Child", projectId: source.id, sectionId: section.id, parentId: parent.id }).expect(201);
+
+    const copy = (await agent.post(`/projects/${source.id}/duplicate`).expect(201)).body.project;
+    expect(copy.id).not.toBe(source.id);
+    expect(copy).toMatchObject({ description: "Original notes", archived: false });
+    const projectsAfterCopy = await agent.get("/projects").expect(200);
+    expect(projectsAfterCopy.body.projects).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: source.id, description: "Original notes" }),
+      expect.objectContaining({ id: copy.id, description: "Original notes" })
+    ]));
+
+    await agent.patch(`/projects/${copy.id}`).send({ description: "Copy notes only" }).expect(200);
+    const projectsAfterEdit = await agent.get("/projects").expect(200);
+    expect(projectsAfterEdit.body.projects).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: source.id, description: "Original notes" }),
+      expect.objectContaining({ id: copy.id, description: "Copy notes only" })
+    ]));
+
+    const sections = await agent.get("/sections").expect(200);
+    const copiedSection = sections.body.sections.find((item: { projectId: string }) => item.projectId === copy.id);
+    expect(copiedSection).toMatchObject({ title: "Milestone" });
+    expect(copiedSection.id).not.toBe(section.id);
+    const tasks = await agent.get("/tasks").expect(200);
+    const copiedParent = tasks.body.tasks.find((item: { projectId: string; parentId: string | null }) => item.projectId === copy.id && item.parentId === null);
+    const copiedChild = tasks.body.tasks.find((item: { projectId: string; parentId: string | null }) => item.projectId === copy.id && item.parentId !== null);
+    expect(copiedParent).toMatchObject({ title: "Parent", sectionId: copiedSection.id });
+    expect(copiedChild).toMatchObject({ title: "Child", sectionId: copiedSection.id, parentId: copiedParent.id });
+    expect(copiedParent.id).not.toBe(parent.id);
+  });
+
   it("returns 404 for unknown projects", async () => {
     const agent = request(createTestServer());
 
