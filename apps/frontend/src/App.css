@@ -1690,19 +1690,5 @@ body {
 .inline-create-form button, .task-details-modal button:not(.task-detail-title-display):not(.task-detail-description-display):not(.task-detail-date):not(.details-subtask):not(.task-detail-label button), .add-task-dialog button { border: 0; border-radius: 6px; padding: 8px 11px; color: #514b46; background: #f2f1f0; font: inherit; font-weight: 600; cursor: pointer; }
 .inline-create-form .btn-primary, .task-details-modal .btn-primary, .add-task-dialog .btn-primary { color: white; background: #d6362b; }
 .task-details-modal button:hover, .add-task-dialog button:hover, .inline-create-form button:hover { filter: brightness(.96); }
-.task-date-picker { position: relative; z-index: 3; width: 304px; max-height: min(620px, calc(100vh - 32px)); overflow-y: auto; display: grid; gap: 0; padding: 0; border: 1px solid #e7e3df; border-radius: 10px; background: #fff; box-shadow: 0 12px 36px #2017102b; }
-.task-date-picker > input { width: 100%; box-sizing: border-box; border: 0; border-bottom: 1px solid #e9e6e3; padding: 13px 15px; font: inherit; outline: none; }
-.task-date-picker > input::placeholder { color: #9a9692; }
-.date-shortcuts { display: grid; padding: 3px 0; border-bottom: 1px solid #e9e6e3; }
-.date-shortcuts button { display: flex; justify-content: space-between; align-items: center; border-radius: 0 !important; padding: 9px 14px !important; background: #fff !important; text-align: left; font-weight: 500 !important; }
-.date-shortcuts button:hover, .date-calendar-grid button:hover { background: #f5f2f0 !important; }
-.date-shortcuts span { color: #99938e; font-weight: 400; }
-.task-date-picker > header { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; }
-.task-date-picker > header button { padding: 5px 9px !important; background: transparent !important; font-size: 1.25rem !important; }
-.date-calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; padding: 2px 10px 12px; text-align: center; }
-.date-calendar-grid > span { padding: 5px 0; color: #89837e; font-size: .78rem; }
-.date-calendar-grid button { min-height: 32px; padding: 3px !important; background: transparent !important; font-weight: 450 !important; }
-.date-calendar-grid button[aria-pressed="true"] { color: white !important; background: #d6362b !important; }
-.date-picker-cancel { justify-self: end; margin: 0 10px 10px; }
 .project-nav-row[draggable="true"] { cursor: grab; }
 .project-nav-row[draggable="true"]:active { cursor: grabbing; }

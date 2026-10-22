@@ -254,32 +254,6 @@ const filterTaskTree = (tasks: ReadonlyArray<TaskNode>, predicate: (task: TaskNo
 const flattenTaskNodes = (tasks: ReadonlyArray<TaskNode>): ReadonlyArray<Task> =>
   Object.freeze(tasks.flatMap((task) => [task, ...flattenTaskNodes(task.children)]));
 
-const isoDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-
-const TaskDatePicker = ({ value, onSelect, onClose }: Readonly<{ value: string; onSelect: (date: string) => void; onClose: () => void }>) => {
-  const today = new Date();
-  const [month, setMonth] = useState(() => (value || isoDate(today)).slice(0, 7));
-  const [typedDate, setTypedDate] = useState(value);
-  const first = new Date(`${month}-01T00:00:00`);
-  const offset = (first.getDay() + 6) % 7;
-  const days = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
-  const choose = (date: Date) => onSelect(isoDate(date));
-  const shiftMonth = (amount: number) => { const next = new Date(first); next.setMonth(next.getMonth() + amount); setMonth(isoDate(next).slice(0, 7)); };
-  const shortcuts = [
-    ["Today", today],
-    ["Tomorrow", new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1)],
-    ["This weekend", new Date(today.getFullYear(), today.getMonth(), today.getDate() + ((6 - today.getDay() + 7) % 7 || 7))],
-    ["Next week", new Date(today.getFullYear(), today.getMonth(), today.getDate() + (8 - today.getDay()) % 7 + (today.getDay() === 1 ? 7 : 0))]
-  ] as const;
-  return <section className="task-date-picker" role="dialog" aria-label="Choose date" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); } }}>
-    <input autoFocus aria-label="Type a date" placeholder="Type a date" value={typedDate} onChange={(event) => setTypedDate(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); if (/^\d{4}-\d{2}-\d{2}$/.test(typedDate)) onSelect(typedDate); } }} />
-    <div className="date-shortcuts">{shortcuts.map(([label, date]) => <button type="button" key={label} onClick={() => choose(date)}>{label}<span>{date.toLocaleDateString(undefined, { weekday: "short" })}</span></button>)}</div>
-    <header><button type="button" aria-label="Previous month" onClick={() => shiftMonth(-1)}>‹</button><strong>{first.toLocaleDateString(undefined, { month: "short", year: "numeric" })}</strong><button type="button" aria-label="Next month" onClick={() => shiftMonth(1)}>›</button></header>
-    <div className="date-calendar-grid">{"MTWTFSS".split("").map((day, index) => <span key={`${day}-${index}`}>{day}</span>)}{Array.from({ length: offset }, (_, index) => <i key={`blank-${index}`} />)}{Array.from({ length: days }, (_, index) => { const date = new Date(first.getFullYear(), first.getMonth(), index + 1); const dateValue = isoDate(date); return <button type="button" key={dateValue} aria-pressed={dateValue === value} onClick={() => choose(date)}>{index + 1}</button>; })}</div>
-    <button type="button" className="date-picker-cancel" onClick={onClose}>Cancel</button>
-  </section>;
-};
-
 const SearchPalette = ({ tasks, projects = Object.freeze([]), sections = Object.freeze([]), onTaskSelect }: Readonly<{ tasks: ReadonlyArray<Task>; projects?: ReadonlyArray<Project>; sections?: ReadonlyArray<Section>; onTaskSelect: (task: Task) => void }>) => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -497,6 +471,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const [detailProjectId, setDetailProjectId] = useState<ProjectId | null>(null);
   const [editingDetailField, setEditingDetailField] = useState<"title" | "description" | null>(null);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const detailDateInputRef = useRef<HTMLInputElement>(null);
   const projectCreateInputRef = useRef<HTMLInputElement>(null);
   const sectionCreateInputRef = useRef<HTMLInputElement>(null);
   const [detailComment, setDetailComment] = useState("");
@@ -515,6 +490,12 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   useEffect(() => { const syncPath = () => setCurrentPath(window.location.pathname); window.addEventListener("popstate", syncPath); return () => window.removeEventListener("popstate", syncPath); }, []);
   useEffect(() => { if (addingProject) projectCreateInputRef.current?.focus(); }, [addingProject]);
   useEffect(() => { if (addingSection) sectionCreateInputRef.current?.focus(); }, [addingSection]);
+  useEffect(() => {
+    if (!datePickerOpen) return;
+    const input = detailDateInputRef.current;
+    input?.focus();
+    try { input?.showPicker(); } catch { /* Some browsers only allow showPicker from the click handler. */ }
+  }, [datePickerOpen]);
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape" && detailsTaskId !== null && editingDetailField === null && !datePickerOpen && detailLabelInput === "") setDetailsTaskId(null);
@@ -1350,7 +1331,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
                 <p className="task-autosave-status" aria-live="polite">{detailSaveStatus}</p>
               </aside>
             </div>
-            {datePickerOpen ? <div className="task-date-picker-backdrop"><TaskDatePicker value={detailDueDate} onClose={() => { setDetailDueDate(selectedDetailsTask.dueDate ?? ""); setDatePickerOpen(false); }} onSelect={async (date) => { setDetailDueDate(date); if (await saveTaskDetails({ dueDate: date || null })) setDatePickerOpen(false); }} /></div> : null}
+            {datePickerOpen ? <div className="task-date-picker-backdrop"><section className="task-date-picker" role="dialog" aria-modal="true" aria-label="Change date" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setDetailDueDate(selectedDetailsTask.dueDate ?? ""); setDatePickerOpen(false); } if (event.key === "Enter") { event.preventDefault(); void saveTaskDetails({ dueDate: detailDueDate || null }).then((saved) => { if (saved) setDatePickerOpen(false); }); } }}><h3>{selectedDetailsTask.dueDate ? "Change date" : "Add date"}</h3><input ref={detailDateInputRef} autoFocus type="date" aria-label="New date" value={detailDueDate} onChange={(event) => setDetailDueDate(event.target.value)} /><div><button type="button" onClick={() => { setDetailDueDate(selectedDetailsTask.dueDate ?? ""); setDatePickerOpen(false); }}>Cancel</button><button type="button" className="btn-primary" onClick={async () => { if (await saveTaskDetails({ dueDate: detailDueDate || null })) setDatePickerOpen(false); }}>Save date</button></div></section></div> : null}
           </section>
         </div>
       ) : null}

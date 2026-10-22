@@ -180,8 +180,8 @@ describe("TaskApp", () => {
     await userEvent.type(within(dialog).getByRole("textbox", { name: "Edit task description" }), "discard{Escape}");
     expect(within(dialog).getByRole("button", { name: "Edit task description" })).toHaveTextContent("Ship release");
     await userEvent.click(within(dialog).getByRole("button", { name: /Add date/ }));
-    await userEvent.type(screen.getByLabelText("Type a date"), "2026-11-01");
-    await userEvent.keyboard("{Enter}");
+    fireEvent.change(screen.getByLabelText("New date"), { target: { value: "2026-11-01" } });
+    await userEvent.click(within(screen.getByRole("dialog", { name: "Change date" })).getByRole("button", { name: "Save date" }));
     await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", { dueDate: "2026-11-01" }));
     await userEvent.click(within(dialog).getByRole("button", { name: "Add label" }));
     await userEvent.type(within(dialog).getByLabelText("Labels"), "work{Enter}");
