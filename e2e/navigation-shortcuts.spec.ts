@@ -139,11 +139,24 @@ test("task dialog, inline keyboard editing, navigation, search, and calendar wor
   await expect(page.getByRole("button", { name: savedTaskName, exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Calendar" }).click();
   await expect(page.getByLabel("Calendar view")).toBeVisible();
+  await expect(page.getByRole("columnheader")).toHaveText(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]);
+  await expect(page.getByRole("gridcell")).toHaveCount(42);
+  await expect(page.getByRole("button", { name: "Today", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Today", exact: true }).click();
+  await expect(page.locator('.dates-calendar-day.today [aria-current="date"]')).toBeVisible();
   await page.getByLabel("Calendar month").fill("2026-11");
   const day18 = page.locator('section[aria-label="Tasks for 2026-11-18"]');
   const day19 = page.locator('section[aria-label="Tasks for 2026-11-19"]');
   await expect(day18.getByRole("button", { name: savedTaskName, exact: true })).toBeVisible();
-  await day18.getByRole("button", { name: savedTaskName, exact: true }).dragTo(day19);
+  await day18.getByRole("button", { name: savedTaskName, exact: true }).evaluate((source) => {
+    const target = document.querySelector<HTMLElement>('section[aria-label="Tasks for 2026-11-19"]');
+    if (target === null) throw new Error("Calendar drop target was not found");
+    const transfer = new DataTransfer();
+    source.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: transfer }));
+    target.dispatchEvent(new DragEvent("dragover", { bubbles: true, dataTransfer: transfer }));
+    target.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer: transfer }));
+    source.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer: transfer }));
+  });
   await expect(day19.getByRole("button", { name: savedTaskName, exact: true })).toBeVisible();
   await expect(day18.getByRole("button", { name: savedTaskName, exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "List" }).click();

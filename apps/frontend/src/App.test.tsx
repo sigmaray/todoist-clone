@@ -188,6 +188,45 @@ describe("TaskApp", () => {
     expect(await screen.findByText("Plan MVP")).toBeInTheDocument();
   });
 
+  it("shows a task description and comment count in the task list", async () => {
+    const description = "A detailed description that is available directly from the task list.";
+    renderApp(baseApi(Object.freeze([task({
+      id: "task-with-details",
+      title: "Plan release",
+      description,
+      comments: Object.freeze([
+        Object.freeze({ id: "comment-1", body: "First", createdAt: "2026-01-01T00:00:00.000Z" }),
+        Object.freeze({ id: "comment-2", body: "Second", createdAt: "2026-01-02T00:00:00.000Z" })
+      ])
+    })])));
+
+    const title = await screen.findByRole("button", { name: "Plan release" });
+    const row = title.closest<HTMLElement>(".task-row");
+    if (row === null) throw new Error("Unable to find task row");
+    expect(within(row).getByText(description)).toHaveClass("task-description-preview");
+    expect(within(row).getByLabelText("2 comments")).toHaveTextContent("2");
+  });
+
+  it("adds suggested labels and removes label chips in task details", async () => {
+    const updateTask = vi.fn(async (id: string, patch: Parameters<ApplicationApi["updateTask"]>[1]): Promise<Task> => task({ id, title: "Plan release", labels: patch.labels ?? [] }));
+    renderApp(Object.freeze({
+      ...baseApi(Object.freeze([
+        task({ id: "task-1", title: "Plan release", labels: Object.freeze(["work"]) }),
+        task({ id: "task-2", title: "Review notes", labels: Object.freeze(["review"]) })
+      ])),
+      updateTask
+    }));
+
+    await userEvent.click(await screen.findByRole("button", { name: "Plan release" }));
+    const dialog = screen.getByRole("dialog", { name: "Task details: Plan release" });
+    const input = within(dialog).getByLabelText("Labels");
+    await userEvent.click(input);
+    await userEvent.click(within(dialog).getByRole("option", { name: "review" }));
+    await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", { labels: ["work", "review"] }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Remove label work" }));
+    await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", { labels: ["review"] }));
+  });
+
   it("edits text on demand with Save, Cancel, Enter and Escape, and edits dates and labels", async () => {
     const updateTask = vi.fn(async (id: string, patch: Parameters<ApplicationApi["updateTask"]>[1]): Promise<Task> => task({ id, title: patch.title ?? "Plan MVP", description: patch.description ?? "", dueDate: patch.dueDate ?? null, labels: patch.labels ?? [], comments: patch.comments ?? [] }));
     renderApp(Object.freeze({ ...baseApi(Object.freeze([task({ id: "task-1", title: "Plan MVP" })])), updateTask }));
@@ -210,7 +249,6 @@ describe("TaskApp", () => {
     fireEvent.change(screen.getByLabelText("New date"), { target: { value: "2026-11-01" } });
     await userEvent.click(within(screen.getByRole("dialog", { name: "Change date" })).getByRole("button", { name: "Save date" }));
     await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", { dueDate: "2026-11-01" }));
-    await userEvent.click(within(dialog).getByRole("button", { name: "Add label" }));
     await userEvent.type(within(dialog).getByLabelText("Labels"), "work{Enter}");
     await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", { labels: ["work"] }));
     await userEvent.type(within(dialog).getByLabelText("Add comment"), "Looks good");
@@ -944,6 +982,31 @@ describe("Dates and Labels task views", () => {
     expect(screen.queryByText("No date")).not.toBeInTheDocument();
     expect(screen.getByText("2026-10-23")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "work" })).toHaveAttribute("href", "/labels?label=work");
+  });
+
+  it("renders a complete navigable month calendar with a visible today marker", async () => {
+    window.history.replaceState({}, "", "/dates");
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const currentMonth = today.slice(0, 7);
+    renderApp(baseApi(Object.freeze([task({ id: "today-task", title: "Scheduled today", dueDate: today })])));
+
+    await userEvent.click(await screen.findByRole("button", { name: "Calendar" }));
+    fireEvent.change(screen.getByLabelText("Calendar month"), { target: { value: currentMonth } });
+
+    expect(screen.getAllByRole("columnheader").map((header) => header.textContent)).toEqual(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]);
+    expect(screen.getAllByRole("gridcell")).toHaveLength(42);
+    const todayCell = screen.getByLabelText(`Tasks for ${today}`);
+    expect(todayCell).toHaveClass("today");
+    expect(within(todayCell).getByRole("button", { name: "Scheduled today" })).toBeInTheDocument();
+    expect(within(todayCell).getByText("Inbox")).toBeInTheDocument();
+
+    const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const expectedNextMonth = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, "0")}`;
+    await userEvent.click(screen.getByRole("button", { name: "Next month" }));
+    expect(screen.getByLabelText("Calendar month")).toHaveValue(expectedNextMonth);
+    await userEvent.click(screen.getByRole("button", { name: "Today" }));
+    expect(screen.getByLabelText("Calendar month")).toHaveValue(currentMonth);
   });
 
   it("filters tasks by selected label across the complete task list", async () => {

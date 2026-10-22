@@ -279,6 +279,67 @@ test("adapts the Add date picker to a small mobile viewport", async ({ page }) =
   await expect(addTaskDialog).toBeVisible();
 });
 
+test("shows truncated descriptions and comment counts in task rows", async ({ page }, testInfo) => {
+  const title = `Task row details ${testInfo.workerIndex}-${Date.now()}`;
+  const description = Array.from({ length: 24 }, () => "A long task description").join(" ");
+  await page.goto("/");
+  await page.getByRole("button", { name: "Add task Q" }).click();
+  const addTaskDialog = page.getByRole("dialog", { name: "Add task" });
+  await addTaskDialog.getByLabel("New task title").fill(title);
+  await addTaskDialog.getByLabel("New task description").fill(description);
+  await addTaskDialog.getByRole("button", { name: "Add task", exact: true }).click();
+
+  const row = page.locator(".task-row").filter({ has: page.getByRole("button", { name: title, exact: true }) });
+  const descriptionPreview = row.locator(".task-description-preview");
+  await expect(descriptionPreview).toHaveText(description);
+  await expect(descriptionPreview).toHaveCSS("text-overflow", "ellipsis");
+  await expect(descriptionPreview).toHaveCSS("white-space", "nowrap");
+  expect(await descriptionPreview.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+
+  await row.getByRole("button", { name: title, exact: true }).click();
+  const taskDialog = page.getByRole("dialog", { name: `Task details: ${title}` });
+  for (const [index, comment] of ["First row comment", "Second row comment"].entries()) {
+    if (index > 0) await row.getByRole("button", { name: title, exact: true }).click();
+    await taskDialog.getByLabel("Add comment").fill(comment);
+    await expect(taskDialog.getByRole("button", { name: "Add comment" })).toBeEnabled();
+    await taskDialog.getByRole("button", { name: "Add comment" }).click();
+    await expect(taskDialog.getByText(comment)).toBeVisible();
+    if (index === 0) await taskDialog.getByRole("button", { name: "Close task details" }).click();
+  }
+  await taskDialog.getByRole("button", { name: "Close task details" }).click();
+  await expect(row.getByLabel("2 comments")).toContainText("2");
+});
+
+test("adds, suggests, and removes labels with the shared label picker", async ({ page }, testInfo) => {
+  const sourceTitle = `Label source ${testInfo.workerIndex}-${Date.now()}`;
+  const targetTitle = `Label target ${testInfo.workerIndex}-${Date.now()}`;
+  await page.goto("/");
+  await page.getByRole("button", { name: "Add task Q" }).click();
+  const addTaskDialog = page.getByRole("dialog", { name: "Add task" });
+  await addTaskDialog.getByLabel("New task title").fill(sourceTitle);
+  await addTaskDialog.getByLabel("New task labels").fill("shared");
+  await addTaskDialog.getByLabel("New task labels").press("Enter");
+  await expect(addTaskDialog.locator(".label-picker-chip")).toContainText("shared");
+  await addTaskDialog.getByRole("button", { name: "Add task", exact: true }).click();
+
+  await createTask(page)(targetTitle);
+  await page.getByRole("button", { name: targetTitle, exact: true }).click();
+  const taskDialog = page.getByRole("dialog", { name: `Task details: ${targetTitle}` });
+  const labelInput = taskDialog.getByRole("textbox", { name: "Labels" });
+  await labelInput.click();
+  await taskDialog.getByRole("option", { name: "shared", exact: true }).click();
+  await expect(taskDialog.locator(".label-picker-chip")).toContainText("shared");
+  await taskDialog.getByRole("button", { name: "Remove label shared" }).click();
+  await expect(taskDialog.locator(".label-picker-chip")).toHaveCount(0);
+  await labelInput.fill("custom");
+  await labelInput.press("Enter");
+  await expect(taskDialog.locator(".label-picker-chip")).toContainText("custom");
+  await labelInput.fill("discarded");
+  await labelInput.press("Escape");
+  await expect(labelInput).toHaveValue("");
+  await expect(taskDialog).toBeVisible();
+});
+
 test("opens settings with deletion confirmation enabled by default", async ({ page }) => {
   await page.goto("/settings");
 

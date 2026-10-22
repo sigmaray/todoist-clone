@@ -12,7 +12,7 @@ import {
 } from "@todoist-clone/domain";
 import type { Project, ProjectId, Section, SectionId, Task, TaskId, TaskNode } from "@todoist-clone/domain";
 import clsx from "clsx";
-import { Archive, CalendarDays, ClipboardCopy, Code2, Copy, Database, Download, Edit3, Eye, GripVertical, Inbox, KeyRound, MoreHorizontal, Menu, Plus, Search, Settings, Tag, Trash2, X } from "lucide-react";
+import { Archive, CalendarDays, ChevronLeft, ChevronRight, ClipboardCopy, Code2, Copy, Database, Download, Edit3, Eye, GripVertical, Inbox, KeyRound, MessageSquare, MoreHorizontal, Menu, Plus, Search, Settings, Tag, Trash2, X } from "lucide-react";
 import type { DragEvent, FormEvent, KeyboardEvent, ReactElement, PointerEvent as ReactPointerEvent, UIEvent } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -71,6 +71,69 @@ const AutoGrowTextarea = ({ value, onChange, ariaLabel, id, placeholder, autoFoc
   };
   useEffect(resize, [value]);
   return <textarea ref={textareaRef} id={id} aria-label={ariaLabel} autoFocus={autoFocus} required={required} className={className} placeholder={placeholder} rows={1} value={value} onChange={(event) => { onChange(event.target.value); resize(); }} onInput={resize} onKeyDown={onKeyDown} />;
+};
+
+type LabelPickerProps = Readonly<{
+  selected: ReadonlyArray<string>;
+  options: ReadonlyArray<string>;
+  inputLabel: string;
+  inputValue: string;
+  onInputChange: (value: string) => void;
+  onChange: (labels: ReadonlyArray<string>) => void | Promise<unknown>;
+}>;
+
+const normalizeLabels = (labels: ReadonlyArray<string>): ReadonlyArray<string> => Object.freeze(labels.reduce<ReadonlyArray<string>>((result, label) => {
+  const normalized = label.trim();
+  return normalized && !result.some((item) => item.toLocaleLowerCase() === normalized.toLocaleLowerCase()) ? [...result, normalized] : result;
+}, Object.freeze([])));
+
+const LabelPicker = ({ selected, options, inputLabel, inputValue, onInputChange, onChange }: LabelPickerProps) => {
+  const [focused, setFocused] = useState(false);
+  const [current, setCurrent] = useState<ReadonlyArray<string>>(selected);
+  useEffect(() => setCurrent(selected), [selected]);
+  const commit = async (labels: ReadonlyArray<string>) => {
+    const next = normalizeLabels(labels);
+    setCurrent(next);
+    try {
+      await onChange(next);
+    } catch {
+      setCurrent(selected);
+    }
+  };
+  const addLabel = async (label: string) => {
+    const next = normalizeLabels([...current, label]);
+    onInputChange("");
+    setFocused(false);
+    if (next.length !== current.length) await commit(next);
+  };
+  const suggestions = normalizeLabels(options)
+    .filter((label) => !current.some((item) => item.toLocaleLowerCase() === label.toLocaleLowerCase()))
+    .filter((label) => !inputValue.trim() || label.toLocaleLowerCase().includes(inputValue.trim().toLocaleLowerCase()))
+    .slice(0, 8);
+  const updateInput = (value: string) => {
+    if (!value.includes(",")) {
+      onInputChange(value);
+      return;
+    }
+    const pieces = value.split(",");
+    const next = normalizeLabels([...current, ...pieces.slice(0, -1)]);
+    if (next.length !== current.length) void commit(next);
+    onInputChange(pieces.at(-1) ?? "");
+  };
+  return <div className="label-picker">
+    <div className="label-picker-control" onFocus={() => setFocused(true)} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false); }}>
+      {current.map((label) => <span className="label-picker-chip" key={label}><Tag size={13} aria-hidden="true" />{label}<button type="button" aria-label={`Remove label ${label}`} onClick={() => void commit(Object.freeze(current.filter((item) => item !== label)))}><X size={13} aria-hidden="true" /></button></span>)}
+      <input aria-label={inputLabel} value={inputValue} placeholder={current.length ? "Add another label" : "Type a label"} onClick={() => setFocused(true)} onChange={(event) => { setFocused(true); updateInput(event.target.value); }} onKeyDown={(event) => {
+        if (event.key === "Enter") { event.preventDefault(); if (inputValue.trim()) void addLabel(inputValue); }
+        if (event.key === "Backspace" && !inputValue && current.length) void commit(Object.freeze(current.slice(0, -1)));
+        if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onInputChange(""); event.currentTarget.blur(); }
+      }} />
+    </div>
+    {focused && suggestions.length > 0 ? <div className="label-picker-suggestions" role="listbox" aria-label="Suggested labels">
+      {suggestions.map((label) => <button type="button" role="option" aria-selected="false" key={label} onMouseDown={(event) => event.preventDefault()} onClick={() => void addLabel(label)}><Tag size={14} aria-hidden="true" /><span>{label}</span></button>)}
+    </div> : null}
+    <small>Press Enter to add a label. Use Backspace to remove the last one.</small>
+  </div>;
 };
 
 const renderTaskNodes = (
@@ -178,7 +241,7 @@ const renderTaskNodes = (
               </div>
             </form>
           ) : (
-            <div className="task-content"><button type="button" className="mobile-task-drag-handle" aria-label={`Drag task ${task.title}`} onPointerDown={actions.startMobileTaskDrag(task)} onPointerMove={actions.moveMobileDrag} onPointerUp={actions.finishMobileDrag} onPointerCancel={actions.cancelMobileDrag}><GripVertical size={16} aria-hidden="true" /></button><button type="button" className={task.completed ? "task-title completed" : "task-title"} onClick={() => actions.openDetails(task)}>{task.title}</button>{task.dueDate || task.labels.length > 0 ? <span className="task-meta-list">{task.dueDate ? <time dateTime={task.dueDate} title={`Due ${task.dueDate}`}>{task.dueDate}</time> : null}{task.labels.map((label) => <a className="task-label" key={label} href={`/labels?label=${encodeURIComponent(label)}`}>{label}</a>)}</span> : null}</div>
+            <div className="task-content"><button type="button" className="mobile-task-drag-handle" aria-label={`Drag task ${task.title}`} onPointerDown={actions.startMobileTaskDrag(task)} onPointerMove={actions.moveMobileDrag} onPointerUp={actions.finishMobileDrag} onPointerCancel={actions.cancelMobileDrag}><GripVertical size={16} aria-hidden="true" /></button><button type="button" className={task.completed ? "task-title completed" : "task-title"} onClick={() => actions.openDetails(task)}>{task.title}</button>{task.description.trim() ? <span className="task-description-preview" title={task.description}>{task.description}</span> : null}{task.dueDate || task.labels.length > 0 || task.comments.length > 0 ? <span className="task-meta-list">{task.dueDate ? <time dateTime={task.dueDate} title={`Due ${task.dueDate}`}>{task.dueDate}</time> : null}{task.labels.map((label) => <a className="task-label" key={label} href={`/labels?label=${encodeURIComponent(label)}`}>{label}</a>)}{task.comments.length > 0 ? <span className="task-comment-count" aria-label={`${task.comments.length} ${task.comments.length === 1 ? "comment" : "comments"}`} title={`${task.comments.length} ${task.comments.length === 1 ? "comment" : "comments"}`}><MessageSquare size={14} aria-hidden="true" /><span aria-hidden="true">{task.comments.length}</span></span> : null}</span> : null}</div>
           )}
           <button type="button" className="task-action" aria-label={`Edit task ${task.title}`} onClick={() => actions.startEditing(task)}>
             <Edit3 size={14} aria-hidden="true" />
@@ -316,6 +379,53 @@ const flattenTaskNodes = (tasks: ReadonlyArray<TaskNode>): ReadonlyArray<Task> =
   Object.freeze(tasks.flatMap((task) => [task, ...flattenTaskNodes(task.children)]));
 
 const toLocalIsoDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
+type CalendarDay = Readonly<{
+  date: string;
+  day: number;
+  isCurrentMonth: boolean;
+  isToday: boolean;
+  isWeekend: boolean;
+}>;
+
+const calendarWeekdays = Object.freeze(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]);
+
+const calendarMonthParts = (month: string) => Object.freeze({
+  year: Number(month.slice(0, 4)),
+  monthIndex: Number(month.slice(5, 7)) - 1
+});
+
+const isoDateFromUtc = (date: Date) => `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+
+const shiftCalendarMonth = (month: string, amount: number) => {
+  const { year, monthIndex } = calendarMonthParts(month);
+  const shifted = new Date(Date.UTC(year, monthIndex + amount, 1));
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}`;
+};
+
+const calendarMonthLabel = (month: string) => {
+  const { year, monthIndex } = calendarMonthParts(month);
+  return new Date(Date.UTC(year, monthIndex, 1)).toLocaleDateString(undefined, { month: "long", year: "numeric", timeZone: "UTC" });
+};
+
+const buildCalendarDays = (month: string): ReadonlyArray<CalendarDay> => {
+  const { year, monthIndex } = calendarMonthParts(month);
+  const firstDay = new Date(Date.UTC(year, monthIndex, 1));
+  const mondayOffset = (firstDay.getUTCDay() + 6) % 7;
+  const today = toLocalIsoDate(new Date());
+  return Object.freeze(Array.from({ length: 42 }, (_, index) => {
+    const current = new Date(Date.UTC(year, monthIndex, index - mondayOffset + 1));
+    const date = isoDateFromUtc(current);
+    const weekday = current.getUTCDay();
+    return Object.freeze({
+      date,
+      day: current.getUTCDate(),
+      isCurrentMonth: current.getUTCMonth() === monthIndex,
+      isToday: date === today,
+      isWeekend: weekday === 0 || weekday === 6
+    });
+  }));
+};
 
 const getDateShortcut = (shortcut: "Today" | "Tomorrow" | "This weekend" | "Next week") => {
   const date = new Date();
@@ -818,13 +928,15 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const [dateView, setDateView] = useState<"list" | "calendar">("list");
   const [calendarMonth, setCalendarMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [activeCalendarDate, setActiveCalendarDate] = useState<string | null>(null);
+  const calendarDraggedTaskRef = useRef<TaskId | null>(null);
   const [addTaskOpen, setAddTaskOpen] = useState(false);
   const [addTaskTitle, setAddTaskTitle] = useState("");
   const [addTaskDescription, setAddTaskDescription] = useState("");
   const [addTaskDate, setAddTaskDate] = useState("");
   const [addTaskDatePickerOpen, setAddTaskDatePickerOpen] = useState(false);
   const [addTaskDateBeforePicker, setAddTaskDateBeforePicker] = useState("");
-  const [addTaskLabels, setAddTaskLabels] = useState("");
+  const [addTaskLabels, setAddTaskLabels] = useState<ReadonlyArray<string>>(Object.freeze([]));
+  const [addTaskLabelInput, setAddTaskLabelInput] = useState("");
   const [addTaskPlacement, setAddTaskPlacement] = useState(inboxPlacement);
   const [title, setTitle] = useState("");
   const [projectTitle, setProjectTitle] = useState("");
@@ -858,7 +970,6 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const [detailTitle, setDetailTitle] = useState("");
   const [detailDescription, setDetailDescription] = useState("");
   const [detailDueDate, setDetailDueDate] = useState("");
-  const [detailLabels, setDetailLabels] = useState("");
   const [detailLabelInput, setDetailLabelInput] = useState("");
   const [detailSaveStatus, setDetailSaveStatus] = useState("");
   const [detailProjectId, setDetailProjectId] = useState<ProjectId | null>(null);
@@ -908,7 +1019,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
         event.preventDefault();
         setAddTaskPlacement(currentPath === "/" ? (targetSectionId === null ? targetProjectId === null ? inboxPlacement : projectPlacement(targetProjectId) : sectionPlacement(targetSectionId)) : inboxPlacement);
         setAddTaskPlacement(currentPath === "/" ? (targetSectionId === null ? targetProjectId === null ? inboxPlacement : projectPlacement(targetProjectId) : sectionPlacement(targetSectionId)) : inboxPlacement);
-        setAddTaskTitle(""); setAddTaskDescription(""); setAddTaskDate(""); setAddTaskLabels(""); setAddTaskOpen(true);
+        setAddTaskTitle(""); setAddTaskDescription(""); setAddTaskDate(""); setAddTaskLabels(Object.freeze([])); setAddTaskLabelInput(""); setAddTaskOpen(true);
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -1432,15 +1543,16 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   };
 
   const dropTaskOnCalendarDate = (date: string) => (event: DragEvent<HTMLElement>) => {
-    const taskId = event.dataTransfer.getData("text/task-id");
-    if (!taskId) return;
     event.preventDefault();
+    const taskId = event.dataTransfer.getData("text/task-id") || calendarDraggedTaskRef.current;
+    calendarDraggedTaskRef.current = null;
     setActiveCalendarDate(null);
     setActiveDropZone(null);
+    if (!taskId) return;
     void api.updateTask(taskId, { dueDate: date }).then(() => queryClient.invalidateQueries({ queryKey: taskQueryKey }));
   };
   const markCalendarDate = (date: string) => (event: DragEvent<HTMLElement>) => {
-    if (!event.dataTransfer.types.includes("text/task-id")) return;
+    if (!event.dataTransfer.types.includes("text/task-id") && calendarDraggedTaskRef.current === null) return;
     event.preventDefault();
     setActiveCalendarDate(date);
   };
@@ -1524,7 +1636,6 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     setDetailTitle(task.title);
     setDetailDescription(task.description);
     setDetailDueDate(task.dueDate ?? "");
-    setDetailLabels(task.labels.join(", "));
     setDetailLabelInput("");
     setDetailSaveStatus("");
     setDetailProjectId(task.projectId);
@@ -1543,6 +1654,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
 
   const allTasks = tasks.data ?? Object.freeze([]);
   const flatTasks = flattenTaskNodes(allTasks);
+  const availableLabels = normalizeLabels(flatTasks.flatMap((task) => task.labels));
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get("addTask") === "1") { setAddTaskPlacement(targetProjectId === null ? inboxPlacement : projectPlacement(targetProjectId)); setAddTaskOpen(true); window.history.replaceState({}, "", window.location.pathname); }
     const taskId = new URLSearchParams(window.location.search).get("task");
@@ -1665,6 +1777,15 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const viewTasks = pageMode === "dates"
     ? filterTaskTree(allTasks, (task) => Boolean(task.dueDate))
     : filterTaskTree(allTasks, (task) => task.labels.length > 0 && (!selectedLabel || task.labels.includes(selectedLabel)));
+  const calendarTasks = Object.freeze(flatTasks.filter((task) => task.dueDate !== null));
+  const calendarDays = buildCalendarDays(calendarMonth);
+  const calendarLabel = calendarMonthLabel(calendarMonth);
+  const calendarTaskCount = calendarTasks.filter((task) => task.dueDate?.startsWith(calendarMonth)).length;
+  const calendarTaskLocation = (task: Task) => {
+    const taskSection = task.sectionId === null ? null : allSections.find((item) => item.id === task.sectionId) ?? null;
+    const taskProject = task.projectId === null ? null : allProjects.find((item) => item.id === task.projectId) ?? null;
+    return taskSection?.title ?? taskProject?.title ?? "Inbox";
+  };
   const viewTitle = pageMode === "dates" ? "Dates" : pageMode === "labels" ? (selectedLabel ? `Label: ${selectedLabel}` : "Labels") : pageMode === "export" ? "Export" : targetProjectId === null ? "Inbox" : taskTargetLabel;
   const markdown = currentMarkdown(taskTargetLabel, inboxRootTasks, allSections, allTasks, targetProjectId);
   const openAddTaskDialog = (placement: string) => {
@@ -1672,7 +1793,8 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     setAddTaskTitle("");
     setAddTaskDescription("");
     setAddTaskDate("");
-    setAddTaskLabels("");
+    setAddTaskLabels(Object.freeze([]));
+    setAddTaskLabelInput("");
     setAddTaskOpen(true);
   };
   const deleteAllTasks = async () => {
@@ -1764,7 +1886,40 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
           <section className="drop-zone task-filter-page" aria-label={`${viewTitle} tasks`}>
             {pageMode === "dates" ? <div className="date-view-switch" aria-label="Date view"><button type="button" aria-pressed={dateView === "list"} onClick={() => setDateView("list")}>List</button><button type="button" aria-pressed={dateView === "calendar"} onClick={() => setDateView("calendar")}>Calendar</button></div> : null}
             {pageMode === "labels" ? <nav className="label-filter-list" aria-label="Filter by label"><Link className={!selectedLabel ? "active" : ""} to="/labels">All labels</Link>{Array.from(new Set(flatTasks.flatMap((task) => task.labels))).sort().map((label) => <Link key={label} className={selectedLabel === label ? "active" : ""} to={`/labels?label=${encodeURIComponent(label)}`}>{label}</Link>)}</nav> : null}
-            {pageMode === "dates" && dateView === "calendar" ? <><div className="calendar-month-control"><button type="button" aria-label="Previous month" onClick={() => setCalendarMonth((month) => { const date = new Date(`${month}-01T00:00:00Z`); date.setUTCMonth(date.getUTCMonth() - 1); return date.toISOString().slice(0, 7); })}>‹</button><label>Month<input aria-label="Calendar month" type="month" value={calendarMonth} onChange={(event) => setCalendarMonth(event.target.value)} /></label><button type="button" aria-label="Next month" onClick={() => setCalendarMonth((month) => { const date = new Date(`${month}-01T00:00:00Z`); date.setUTCMonth(date.getUTCMonth() + 1); return date.toISOString().slice(0, 7); })}>›</button></div><div className="dates-calendar" aria-label="Calendar view">{Array.from({ length: new Date(Number(calendarMonth.slice(0, 4)), Number(calendarMonth.slice(5, 7)), 0).getDate() }, (_, index) => index + 1).map((day) => { const date = `${calendarMonth}-${String(day).padStart(2, "0")}`; const matching = viewTasks.filter((task) => task.dueDate === date); return <section key={day} className={clsx("dates-calendar-day", activeCalendarDate === date && "calendar-drop-active")} aria-label={`Tasks for ${date}`} onDragOver={markCalendarDate(date)} onDragLeave={() => setActiveCalendarDate(null)} onDrop={dropTaskOnCalendarDate(date)}><h2>{day}</h2>{matching.map((task) => <button type="button" key={task.id} draggable onDragStart={(event) => { setDraggingTaskId(task.id); event.dataTransfer.setData("text/task-id", task.id); event.dataTransfer.effectAllowed = "move"; }} onDragEnd={() => { setDraggingTaskId(null); setActiveCalendarDate(null); }} onClick={() => { const node = findTaskNode(allTasks, task.id); if (node) openDetails(node); }}>{task.title}</button>)}</section>; })}</div></> : viewTasks.length > 0 ? renderTaskNodes(viewTasks, taskActions) : <p className="empty">{pageMode === "dates" ? "No dated tasks yet." : "No tasks with this label."}</p>}
+            {pageMode === "dates" && dateView === "calendar" ? (
+              <section className="calendar-panel" aria-labelledby="calendar-month-heading">
+                <header className="calendar-month-control">
+                  <div className="calendar-month-navigation">
+                    <button type="button" aria-label="Previous month" onClick={() => setCalendarMonth((month) => shiftCalendarMonth(month, -1))}><ChevronLeft size={18} aria-hidden="true" /></button>
+                    <h2 id="calendar-month-heading">{calendarLabel}</h2>
+                    <button type="button" aria-label="Next month" onClick={() => setCalendarMonth((month) => shiftCalendarMonth(month, 1))}><ChevronRight size={18} aria-hidden="true" /></button>
+                  </div>
+                  <p className="calendar-month-summary">{calendarTaskCount} {calendarTaskCount === 1 ? "task" : "tasks"}</p>
+                  <div className="calendar-month-actions">
+                    <button type="button" className="calendar-today-button" onClick={() => setCalendarMonth(toLocalIsoDate(new Date()).slice(0, 7))}>Today</button>
+                    <label className="calendar-month-picker"><span>Choose month</span><input aria-label="Calendar month" type="month" value={calendarMonth} onChange={(event) => { if (event.target.value) setCalendarMonth(event.target.value); }} /></label>
+                  </div>
+                </header>
+                <div className="dates-calendar-scroll">
+                  <div className="dates-calendar-frame">
+                    <div className="dates-calendar-weekdays" role="row">
+                      {calendarWeekdays.map((weekday, index) => <div key={weekday} role="columnheader" className={index > 4 ? "weekend" : undefined}>{weekday}</div>)}
+                    </div>
+                    <div className="dates-calendar" role="grid" aria-label="Calendar view">
+                      {calendarDays.map((day) => {
+                        const matching = calendarTasks.filter((task) => task.dueDate === day.date);
+                        return <section key={day.date} role="gridcell" className={clsx("dates-calendar-day", !day.isCurrentMonth && "outside-month", day.isWeekend && "weekend", day.isToday && "today", activeCalendarDate === day.date && "calendar-drop-active")} aria-label={`Tasks for ${day.date}`} onDragOver={markCalendarDate(day.date)} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setActiveCalendarDate(null); }} onDrop={dropTaskOnCalendarDate(day.date)}>
+                          <header className="calendar-day-header"><time dateTime={day.date} aria-current={day.isToday ? "date" : undefined}>{day.day}</time>{matching.length > 0 ? <span aria-label={`${matching.length} ${matching.length === 1 ? "task" : "tasks"}`}>{matching.length}</span> : null}</header>
+                          <div className="calendar-day-tasks">
+                            {matching.map((task) => <button type="button" className="calendar-task-card" aria-label={task.title} title={`${task.title} · ${calendarTaskLocation(task)}`} key={task.id} draggable onDragStart={(event) => { calendarDraggedTaskRef.current = task.id; setDraggingTaskId(task.id); event.dataTransfer.setData("text/task-id", task.id); event.dataTransfer.effectAllowed = "move"; }} onDragEnd={() => { calendarDraggedTaskRef.current = null; setDraggingTaskId(null); setActiveCalendarDate(null); }} onClick={() => { const node = findTaskNode(allTasks, task.id); if (node) openDetails(node); }}><span>{task.title}</span><small>{calendarTaskLocation(task)}</small></button>)}
+                          </div>
+                        </section>;
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </section>
+            ) : viewTasks.length > 0 ? renderTaskNodes(viewTasks, taskActions) : <p className="empty">{pageMode === "dates" ? "No dated tasks yet." : "No tasks with this label."}</p>}
           </section>
         ) : pageMode === "export" ? (
           <section className="export-page" aria-label="Export data">
@@ -1967,7 +2122,8 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
             if (!taskTitle) return;
             const placement = parsePlacement(addTaskPlacement, allSections);
             const created = await api.createTask(taskTitle, placement.projectId, placement.sectionId, null);
-            const patch: Parameters<ApplicationApi["updateTask"]>[1] = { description: addTaskDescription, dueDate: addTaskDate || null, labels: addTaskLabels.split(",").map((label) => label.trim()).filter(Boolean) };
+            const labels = normalizeLabels([...addTaskLabels, addTaskLabelInput]);
+            const patch: Parameters<ApplicationApi["updateTask"]>[1] = { description: addTaskDescription, dueDate: addTaskDate || null, labels };
             if (patch.description || patch.dueDate || patch.labels?.length) await api.updateTask(created.id, patch);
             await queryClient.invalidateQueries({ queryKey: taskQueryKey });
             setAddTaskOpen(false);
@@ -1978,7 +2134,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
               {createPlacementOptions(activeProjects, allSections.filter((section) => section.projectId === null || activeProjects.some((project) => project.id === section.projectId))).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select></label>
             <label>Date{addTaskDate ? <div className="task-detail-meta-value"><button type="button" className="task-detail-date" onClick={() => { setAddTaskDateBeforePicker(addTaskDate); setAddTaskDatePickerOpen(true); }}>{new Date(`${addTaskDate}T00:00:00`).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}</button><button type="button" aria-label="Remove task date" onClick={() => setAddTaskDate("")}>×</button></div> : <button type="button" aria-label="Add date" className="btn-primary add-task-date-button" onClick={() => { setAddTaskDateBeforePicker(addTaskDate); setAddTaskDatePickerOpen(true); }}>＋ Add date</button>}</label>
-            <label>Labels<input aria-label="New task labels" value={addTaskLabels} onChange={(event) => setAddTaskLabels(event.target.value)} placeholder="Separate labels with commas" /></label>
+            <div className="add-task-labels"><span className="form-field-label">Labels</span><LabelPicker selected={addTaskLabels} options={availableLabels} inputLabel="New task labels" inputValue={addTaskLabelInput} onInputChange={setAddTaskLabelInput} onChange={setAddTaskLabels} /></div>
             <div><button type="button" onClick={() => setAddTaskOpen(false)}>Cancel</button><button type="submit" className="btn-primary">Add task</button></div>
           </form>
           {addTaskDatePickerOpen ? <div className="task-date-picker-backdrop"><section className="task-date-picker" role="dialog" aria-modal="true" aria-label="Add date" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setAddTaskDate(addTaskDateBeforePicker); setAddTaskDatePickerOpen(false); } }}><h3>Add date</h3><DatePickerPanel inputLabel="New task date" value={addTaskDate} onChange={setAddTaskDate} /><div className="task-date-picker-actions"><button type="button" onClick={() => { setAddTaskDate(addTaskDateBeforePicker); setAddTaskDatePickerOpen(false); }}>Cancel</button><button type="button" className="btn-primary" onClick={() => setAddTaskDatePickerOpen(false)}>Set date</button></div></section></div> : null}
@@ -2014,7 +2170,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
                   {createPlacementOptions(activeProjects, allSections.filter((section) => section.projectId === null || activeProjects.some((project) => project.id === section.projectId))).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                 </select></section>
                 <section><h3>Date</h3>{detailDueDate ? <div className="task-detail-meta-value"><button type="button" className="task-detail-date" onClick={() => setDatePickerOpen(true)} title={detailDueDate}>{new Date(`${detailDueDate}T00:00:00`).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}</button><button type="button" aria-label="Remove date" onClick={async () => { setDetailDueDate(""); await saveTaskDetails({ dueDate: null }); }}>×</button></div> : <button type="button" className="btn-primary" onClick={() => setDatePickerOpen(true)}>＋ Add date</button>}</section>
-                <section><div className="task-detail-label-heading"><h3>Labels</h3><button type="button" aria-label="Add label" onClick={() => setDetailLabelInput(" ")}>＋</button></div><div className="detail-label-chips">{selectedDetailsTask.labels.map((label) => <span className="task-detail-label" key={label}>{label}<button type="button" aria-label={`Remove label ${label}`} onClick={() => { const labels = selectedDetailsTask.labels.filter((item) => item !== label); setDetailLabels(labels.join(", ")); void saveTaskDetails({ labels }); }}>×</button></span>)}</div>{detailLabelInput !== "" ? <><input autoFocus aria-label="Labels" list="task-label-options" value={detailLabelInput.trimStart()} placeholder="Add a label" onChange={(event) => setDetailLabelInput(event.target.value)} onKeyDown={async (event) => { if (event.key === "Escape") setDetailLabelInput(""); if (event.key === "Enter") { event.preventDefault(); const label = detailLabelInput.trim(); if (!label) return; const labels = Array.from(new Set([...selectedDetailsTask.labels, label])); if (await saveTaskDetails({ labels })) setDetailLabelInput(""); } }} /><datalist id="task-label-options">{Array.from(new Set(flatTasks.flatMap((task) => task.labels))).map((label) => <option key={label} value={label} />)}</datalist></> : null}</section>
+                <section><h3>Labels</h3><LabelPicker selected={selectedDetailsTask.labels} options={availableLabels} inputLabel="Labels" inputValue={detailLabelInput} onInputChange={setDetailLabelInput} onChange={(labels) => saveTaskDetails({ labels })} /></section>
                 <p className="task-autosave-status" aria-live="polite">{detailSaveStatus}</p>
               </aside>
             </div>

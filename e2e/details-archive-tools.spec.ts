@@ -75,11 +75,9 @@ test("edits task details and copies all Markdown", async ({ context, page }) => 
   await taskDialog.locator(".task-detail-date").click();
   await page.getByLabel("New date").fill("2026-11-01");
   await page.getByRole("dialog", { name: "Change date" }).getByRole("button", { name: "Save date" }).click();
-  await taskDialog.getByRole("button", { name: "Add label" }).click();
-  await page.getByLabel("Labels").fill("work");
+  await taskDialog.getByRole("textbox", { name: "Labels" }).fill("work");
   await page.keyboard.press("Enter");
-  await taskDialog.getByRole("button", { name: "Add label" }).click();
-  await page.getByLabel("Labels").fill("review");
+  await taskDialog.getByRole("textbox", { name: "Labels" }).fill("review");
   await page.keyboard.press("Enter");
   const commentEditor = page.getByLabel("Add comment");
   await expect(commentEditor).toHaveJSProperty("tagName", "TEXTAREA");
@@ -105,8 +103,8 @@ test("edits task details and copies all Markdown", async ({ context, page }) => 
   const reopenedDialog = page.getByRole("dialog", { name: `Task details: ${title}` });
   await expect(reopenedDialog.getByRole("button", { name: "Edit task description" })).toHaveText("Task details saved from the dialog");
   await expect(reopenedDialog.locator(".task-detail-date")).toHaveAttribute("title", "2026-11-01");
-  await expect(reopenedDialog.locator(".task-detail-label").nth(0)).toContainText("work");
-  await expect(reopenedDialog.locator(".task-detail-label").nth(1)).toContainText("review");
+  await expect(reopenedDialog.locator(".label-picker-chip").nth(0)).toContainText("work");
+  await expect(reopenedDialog.locator(".label-picker-chip").nth(1)).toContainText("review");
   await expect(page.getByText("First comment")).toBeVisible();
   await expect(reopenedDialog.getByRole("button", { name: "Nested from details", exact: true })).toBeVisible();
   await reopenedDialog.getByRole("button", { name: "Nested from details", exact: true }).click();
