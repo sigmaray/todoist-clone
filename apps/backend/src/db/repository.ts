@@ -1,6 +1,6 @@
 import { generateLexicalOrder } from "@todoist-clonse/domain";
 import type { Priority, Project, ProjectId, Section, SectionId, Task, TaskId } from "@todoist-clonse/domain";
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { projects as projectsTable, sections as sectionsTable, tasks as tasksTable } from "./schema";
@@ -10,15 +10,11 @@ type TaskRow = typeof tasksTable.$inferSelect;
 type ProjectRow = typeof projectsTable.$inferSelect;
 type SectionRow = typeof sectionsTable.$inferSelect;
 
-const freezeTask = (task: Task): Task => Object.freeze(task);
-const freezeProject = (project: Project): Project => Object.freeze(project);
-const freezeSection = (section: Section): Section => Object.freeze(section);
-
 const normalizeDate = (value: Date | string): string =>
   typeof value === "string" ? new Date(value).toISOString() : value.toISOString();
 
 const toTask = (row: TaskRow): Task =>
-  freezeTask({
+  Object.freeze({
     id: row.id,
     title: row.title,
     completed: row.completed,
@@ -32,7 +28,7 @@ const toTask = (row: TaskRow): Task =>
   });
 
 const toProject = (row: ProjectRow): Project =>
-  freezeProject({
+  Object.freeze({
     id: row.id,
     title: row.title,
     lexicalOrder: row.lexicalOrder,
@@ -41,7 +37,7 @@ const toProject = (row: ProjectRow): Project =>
   });
 
 const toSection = (row: SectionRow): Section =>
-  freezeSection({
+  Object.freeze({
     id: row.id,
     title: row.title,
     projectId: row.projectId,
@@ -50,9 +46,9 @@ const toSection = (row: SectionRow): Section =>
     updatedAt: normalizeDate(row.updatedAt)
   });
 
-const rowOrder = asc(tasksTable.lexicalOrder);
-const projectOrder = asc(projectsTable.lexicalOrder);
-const sectionOrder = asc(sectionsTable.lexicalOrder);
+const rowOrder = asc(sql`${tasksTable.lexicalOrder} COLLATE "C"`);
+const projectOrder = asc(sql`${projectsTable.lexicalOrder} COLLATE "C"`);
+const sectionOrder = asc(sql`${sectionsTable.lexicalOrder} COLLATE "C"`);
 
 const nullableEq = <TColumn>(column: TColumn, value: string | null) =>
   value === null ? isNull(column as never) : eq(column as never, value);
@@ -76,10 +72,17 @@ const findSiblingOrder = async (
       )
     )
     .orderBy(rowOrder);
-  const before = beforeId === null ? siblings.at(-1) : siblings.find((task) => task.id === beforeId);
-  const after = afterId === null ? null : siblings.find((task) => task.id === afterId);
+  const successorIndex = beforeId === null ? -1 : siblings.findIndex((task) => task.id === beforeId);
+  const predecessorIndex = afterId === null ? -1 : siblings.findIndex((task) => task.id === afterId);
+  const low =
+    predecessorIndex >= 0
+      ? siblings[predecessorIndex]?.lexicalOrder ?? null
+      : beforeId === null && afterId === null
+        ? siblings.at(-1)?.lexicalOrder ?? null
+        : null;
+  const high = successorIndex >= 0 ? siblings[successorIndex]?.lexicalOrder ?? null : null;
 
-  return generateLexicalOrder(before?.lexicalOrder ?? null, after?.lexicalOrder ?? null);
+  return generateLexicalOrder(low, high);
 };
 
 const collectDescendantIds = async (db: ReturnType<typeof drizzle>, id: TaskId): Promise<ReadonlyArray<TaskId>> => {
@@ -125,6 +128,50 @@ export const createPostgresTaskRepository = (databaseUrl: string): TaskRepositor
       }
 
       return project;
+    },
+    updateProject: async (id, title) => {
+      const rows = await db
+        .update(projectsTable)
+        .set({
+          title,
+          updatedAt: new Date()
+        })
+        .where(eq(projectsTable.id, id))
+        .returning();
+
+      return firstProject(rows);
+    },
+    deleteProject: async (id) => {
+      const rows = await db
+        .delete(projectsTable)
+        .where(eq(projectsTable.id, id))
+        .returning({ id: projectsTable.id });
+
+      if (rows.length === 0) {
+        return false;
+      }
+
+      const projectSections = await db.select({ id: sectionsTable.id }).from(sectionsTable).where(eq(sectionsTable.projectId, id));
+      const sectionIds = Object.freeze(projectSections.map((section) => section.id));
+      const doomedRoots = await db
+        .select({ id: tasksTable.id })
+        .from(tasksTable)
+        .where(
+          sectionIds.length > 0
+            ? or(eq(tasksTable.projectId, id), inArray(tasksTable.sectionId, [...sectionIds]))
+            : eq(tasksTable.projectId, id)
+        );
+      const doomedIds = Object.freeze(
+        [...new Set((await Promise.all(doomedRoots.map((row) => collectDescendantIds(db, row.id)))).flat())]
+      );
+
+      if (doomedIds.length > 0) {
+        await db.delete(tasksTable).where(inArray(tasksTable.id, [...doomedIds]));
+      }
+
+      await db.delete(sectionsTable).where(eq(sectionsTable.projectId, id));
+
+      return true;
     },
     listSections: async () => {
       const rows = await db.select().from(sectionsTable).orderBy(sectionOrder);

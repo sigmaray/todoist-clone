@@ -7,6 +7,7 @@ Self-hosted Todoist clone (MVP). A fast, hierarchical task manager with drag-and
 - **NO CLASSES, NO OOP, NO `this` keyword.** This is a hard rule.
 - Use only pure functions, closures, and factory functions.
 - All data structures must be immutable. Use `Readonly<T>`, `ReadonlyArray<T>`, and `Object.freeze()`.
+- Prefer TypeScript `Readonly<T>`/`ReadonlyArray<T>` as the main immutability mechanism. Use runtime `Object.freeze()` only at useful boundaries (for example shared constants, returned trees, and test fixtures), and avoid ceremonial wrappers such as `freezeTask`/`freezeProject`/`freezeSection`; inline freezing at the creation boundary is clearer when runtime freezing is actually useful.
 - Do not use structural mutation. Return new objects/arrays.
 - Use Discriminated Unions and Pattern Matching (via `switch` or functional libraries) instead of polymorphism.
 
@@ -33,3 +34,7 @@ Self-hosted Todoist clone (MVP). A fast, hierarchical task manager with drag-and
 - UI state management relies heavily on React Query's `onMutate` for Optimistic Updates.
 - Frontend basic functionality (rendering, state updates, event dispatching) MUST be verified via Unit Tests before moving to E2E.
 - E2E tests in Playwright must use functional helpers (closures), not Page Object Model classes. E2E testing is a mandatory part of the MVP.
+
+## Development Workflow
+- **Every important change MUST update and run tests.** When you add or change behavior, update or add unit tests (domain, backend API, frontend components) and E2E tests, then run the full suite (`pnpm test` for unit/integration and `pnpm test:e2e` for E2E) and make sure it is green before considering the work done. Do not report work as complete while any test is failing.
+- **Maintain `MEMORY.md` at the repo root.** For each work session, append a short entry: date, what was done, key decisions, and the current state of the project. A new agent must read `MEMORY.md` first to rebuild context cheaply.

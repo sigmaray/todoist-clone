@@ -57,6 +57,8 @@ const baseApi = (tasks: ReadonlyArray<TaskNode>): TaskApi =>
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z"
       }),
+    updateProject: async (id, title) => project({ id, title }),
+    deleteProject: async () => undefined,
     listSections: async () => Object.freeze([]),
     createSection: async (title, projectId) =>
       Object.freeze({
@@ -79,7 +81,7 @@ const baseApi = (tasks: ReadonlyArray<TaskNode>): TaskApi =>
     deleteSection: async () => undefined,
     createTask: async (title, projectId, sectionId, parentId): Promise<Task> => task({ id: "created", title, projectId, sectionId, parentId }),
     patchTask: async (id, completed): Promise<Task> => task({ id, title: "Plan MVP", completed }),
-    updateTaskTitle: async (id, title): Promise<Task> => task({ id, title }),
+    updateTask: async (id, patch): Promise<Task> => task({ id, title: patch.title ?? "Plan MVP" }),
     moveTask: async (id, projectId, sectionId, parentId): Promise<Task> => task({ id, title: "Moved", projectId, sectionId, parentId }),
     deleteTask: async () => undefined
   });
@@ -99,6 +101,34 @@ const dragTask = (title: string) => {
   fireEvent.dragStart(row, { dataTransfer });
 
   return dataTransfer;
+};
+
+const taskRow = (title: string) => {
+  const row = screen.getByText(title).closest(".task-row");
+
+  if (row === null) {
+    throw new Error(`Unable to find row for ${title}`);
+  }
+
+  return row;
+};
+
+const placePointer = (row: Element, top = 0) => {
+  Object.defineProperty(row, "getBoundingClientRect", {
+    configurable: true,
+    value: () =>
+      Object.freeze({
+      x: 0,
+      y: top,
+      top,
+      right: 400,
+      bottom: top + 100,
+      left: 0,
+      width: 400,
+      height: 100,
+      toJSON: () => Object.freeze({})
+    })
+  });
 };
 
 afterEach(() => {
@@ -198,6 +228,39 @@ describe("TaskApp", () => {
     expect(await screen.findByRole("button", { name: "Roadmap" })).toBeInTheDocument();
   });
 
+  it("updates and deletes projects from the sidebar", async () => {
+    const updateProject = vi.fn(async (id: string, title: string): Promise<Project> => project({ id, title }));
+    const deleteProject = vi.fn(async () => undefined);
+
+    renderApp(
+      Object.freeze({
+        ...baseApi(Object.freeze([])),
+        listProjects: async () => Object.freeze([project({ id: "project-1", title: "Roadmap" })]),
+        updateProject,
+        deleteProject
+      })
+    );
+
+    await screen.findByRole("button", { name: "Roadmap" });
+    await userEvent.click(screen.getByRole("button", { name: "Edit project Roadmap" }));
+    await screen.findByRole("button", { name: "Save project" });
+    const editInput = screen.getAllByLabelText("Project title").at(0);
+
+    if (editInput === undefined) {
+      throw new Error("Missing project edit input");
+    }
+
+    await userEvent.clear(editInput);
+    await userEvent.type(editInput, "Launch plan");
+    await userEvent.click(screen.getByRole("button", { name: "Save project" }));
+
+    await waitFor(() => expect(updateProject).toHaveBeenCalledWith("project-1", "Launch plan"));
+
+    await userEvent.click(await screen.findByRole("button", { name: "Delete project Launch plan" }));
+
+    await waitFor(() => expect(deleteProject).toHaveBeenCalledWith("project-1"));
+  });
+
   it("creates inbox sections and moves inbox tasks into them", async () => {
     let sections = Object.freeze([] as ReadonlyArray<Section>);
     const moveTask = vi.fn(async (id: string, projectId: string | null, sectionId: string | null, parentId: string | null): Promise<Task> =>
@@ -224,7 +287,7 @@ describe("TaskApp", () => {
     const dataTransfer = dragTask("Sort receipts");
     fireEvent.drop(await screen.findByLabelText("Section Later"), { dataTransfer });
 
-    await waitFor(() => expect(moveTask).toHaveBeenCalledWith("task-1", null, "section-1", null));
+    await waitFor(() => expect(moveTask).toHaveBeenCalledWith("task-1", null, "section-1", null, null, null));
   });
 
   it("shows a created inbox section from the create response", async () => {
@@ -263,7 +326,24 @@ describe("TaskApp", () => {
     const dataTransfer = dragTask("Plan launch");
     fireEvent.drop(screen.getByRole("button", { name: "Inbox" }), { dataTransfer });
 
-    await waitFor(() => expect(moveTask).toHaveBeenCalledWith("task-1", null, null, null));
+    await waitFor(() => expect(moveTask).toHaveBeenCalledWith("task-1", null, null, null, null, null));
+  });
+
+  it("highlights a project while a task is dragged over it", async () => {
+    renderApp(
+      Object.freeze({
+        ...baseApi(Object.freeze([task({ id: "task-1", title: "Plan launch" })])),
+        listProjects: async () => Object.freeze([project({ id: "project-1", title: "Launch" })])
+      })
+    );
+
+    await screen.findByText("Plan launch");
+    const dataTransfer = dragTask("Plan launch");
+    const projectButton = await screen.findByRole("button", { name: "Launch" });
+
+    fireEvent.dragEnter(projectButton, { dataTransfer });
+
+    expect(projectButton).toHaveClass("drop-active");
   });
 
   it("moves a task inside another task with drag and drop", async () => {
@@ -283,19 +363,121 @@ describe("TaskApp", () => {
 
     await screen.findByText("Parent task");
     const dataTransfer = dragTask("Child task");
-    fireEvent.drop(screen.getByText("Parent task").closest(".task-row") ?? screen.getByText("Parent task"), { dataTransfer });
+    const parentRow = taskRow("Parent task");
 
-    await waitFor(() => expect(moveTask).toHaveBeenCalledWith("child", null, null, "parent"));
+    placePointer(parentRow, -50);
+    fireEvent.drop(parentRow, { dataTransfer });
+
+    await waitFor(() => expect(moveTask).toHaveBeenCalledWith("child", null, null, "parent", null, null));
+  });
+
+  it("reorders sibling tasks with drag and drop insertion lines", async () => {
+    const moveTask = vi.fn(async (id: string, projectId: string | null, sectionId: string | null, parentId: string | null): Promise<Task> =>
+      task({ id, title: "Moved", projectId, sectionId, parentId })
+    );
+
+    renderApp(
+      Object.freeze({
+        ...baseApi(Object.freeze([
+          task({ id: "a", title: "Alpha", lexicalOrder: "a" }),
+          task({ id: "b", title: "Beta", lexicalOrder: "b" }),
+          task({ id: "c", title: "Gamma", lexicalOrder: "c" })
+        ])),
+        moveTask
+      })
+    );
+
+    await screen.findByText("Alpha");
+    const dataTransfer = dragTask("Gamma");
+    const alphaRow = taskRow("Alpha");
+
+    placePointer(alphaRow, 0);
+    fireEvent.dragEnter(alphaRow, { dataTransfer });
+
+    expect(alphaRow).toHaveClass("drag-before");
+
+    fireEvent.drop(alphaRow, { dataTransfer });
+
+    await waitFor(() => expect(moveTask).toHaveBeenCalledWith("c", null, null, null, "a", null));
+  });
+
+  it("indents and outdents tasks with keyboard shortcuts", async () => {
+    const moveTask = vi.fn(async (id: string, projectId: string | null, sectionId: string | null, parentId: string | null): Promise<Task> =>
+      task({ id, title: "Moved", projectId, sectionId, parentId })
+    );
+
+    renderApp(
+      Object.freeze({
+        ...baseApi(Object.freeze([
+          task({ id: "a", title: "Alpha", lexicalOrder: "a" }),
+          task({ id: "b", title: "Beta", lexicalOrder: "b" }),
+          task({ id: "parent", title: "Parent", lexicalOrder: "c", children: Object.freeze([
+            task({ id: "child", title: "Child", parentId: "parent", lexicalOrder: "a" })
+          ]) })
+        ])),
+        moveTask
+      })
+    );
+
+    await screen.findByText("Beta");
+    fireEvent.keyDown(taskRow("Beta"), { key: "ArrowRight", ctrlKey: true });
+
+    await waitFor(() => expect(moveTask).toHaveBeenCalledWith("b", null, null, "a", null, null));
+
+    fireEvent.keyDown(taskRow("Child"), { key: "ArrowLeft", ctrlKey: true });
+
+    await waitFor(() => expect(moveTask).toHaveBeenCalledWith("child", null, null, null, null, "parent"));
+  });
+
+  it("outdents a nested task by dragging it left", async () => {
+    const moveTask = vi.fn(async (id: string, projectId: string | null, sectionId: string | null, parentId: string | null): Promise<Task> =>
+      task({ id, title: "Moved", projectId, sectionId, parentId })
+    );
+
+    renderApp(
+      Object.freeze({
+        ...baseApi(Object.freeze([
+          task({ id: "parent", title: "Parent", lexicalOrder: "a", children: Object.freeze([
+            task({ id: "child", title: "Child", parentId: "parent", lexicalOrder: "a" })
+          ]) })
+        ])),
+        moveTask
+      })
+    );
+
+    await screen.findByText("Child");
+    const dataTransfer = dragTask("Child");
+    const childRow = taskRow("Child");
+
+    placePointer(childRow, 0);
+    Object.defineProperty(childRow, "getBoundingClientRect", {
+      configurable: true,
+      value: () =>
+        Object.freeze({
+          x: 50,
+          y: 0,
+          top: 0,
+          right: 450,
+          bottom: 100,
+          left: 50,
+          width: 400,
+          height: 100,
+          toJSON: () => Object.freeze({})
+        })
+    });
+    fireEvent.drop(childRow, { dataTransfer, clientX: -24 });
+
+    await waitFor(() => expect(moveTask).toHaveBeenCalledWith("child", null, null, null, null, "parent"));
   });
 
   it("calls update and delete handlers", async () => {
-    const updateTaskTitle = vi.fn(async (id: string, title: string): Promise<Task> => task({ id, title }));
+    const updateTask = vi.fn(async (id: string, patch: Readonly<{ title?: string }>): Promise<Task> => task({ id, title: patch.title ?? "Plan MVP" }));
     const deleteTask = vi.fn(async () => undefined);
 
     renderApp(
       Object.freeze({
         ...baseApi(Object.freeze([task({ id: "1", title: "Plan MVP" })])),
-        updateTaskTitle,
+        updateTask,
         deleteTask
       })
     );
@@ -306,7 +488,7 @@ describe("TaskApp", () => {
     await userEvent.type(screen.getByLabelText("Edit Plan MVP"), "Plan MVP carefully");
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() => expect(updateTaskTitle).toHaveBeenCalledWith("1", "Plan MVP carefully"));
+    await waitFor(() => expect(updateTask).toHaveBeenCalledWith("1", { title: "Plan MVP carefully" }));
 
     await userEvent.click(screen.getByRole("button", { name: "Delete task Plan MVP" }));
 
@@ -314,7 +496,7 @@ describe("TaskApp", () => {
   });
 
   it("assigns a task to a project while editing", async () => {
-    const updateTaskTitle = vi.fn(async (id: string, title: string): Promise<Task> => task({ id, title }));
+    const updateTask = vi.fn(async (id: string, patch: Readonly<{ title?: string }>): Promise<Task> => task({ id, title: patch.title ?? "Plan MVP" }));
     const moveTask = vi.fn(async (id: string, projectId: string | null, sectionId: string | null, parentId: string | null): Promise<Task> =>
       task({ id, title: "Plan MVP", projectId, sectionId, parentId })
     );
@@ -323,7 +505,7 @@ describe("TaskApp", () => {
       Object.freeze({
         ...baseApi(Object.freeze([task({ id: "1", title: "Plan MVP" })])),
         listProjects: async () => Object.freeze([project({ id: "project-1", title: "Roadmap" })]),
-        updateTaskTitle,
+        updateTask,
         moveTask
       })
     );
@@ -333,8 +515,8 @@ describe("TaskApp", () => {
     await userEvent.selectOptions(screen.getByLabelText("Move Plan MVP to"), "project:project-1");
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() => expect(updateTaskTitle).toHaveBeenCalledWith("1", "Plan MVP"));
-    await waitFor(() => expect(moveTask).toHaveBeenCalledWith("1", "project-1", null, null));
+    await waitFor(() => expect(updateTask).toHaveBeenCalledWith("1", { title: "Plan MVP" }));
+    await waitFor(() => expect(moveTask).toHaveBeenCalledWith("1", "project-1", null, null, null, null));
   });
 
   it("updates and deletes inbox sections", async () => {
@@ -401,6 +583,8 @@ describe("ToolsPage", () => {
     );
 
     expect(await screen.findByText("Database Tools")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Inbox" })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "Tools" })).toHaveAttribute("href", "/tools");
     await userEvent.click(screen.getByRole("button", { name: "Clear selected table" }));
 
     await waitFor(() => expect(clearTable).toHaveBeenCalledWith("tasks"));
@@ -424,7 +608,7 @@ describe("createTaskApi", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    await createTaskApi("http://api.test").moveTask("task-1", "project-1", null, "parent-1");
+    await createTaskApi("http://api.test").moveTask("task-1", "project-1", null, "parent-1", "before-1", "after-1");
 
     expect(fetchMock).toHaveBeenCalledWith(
       "http://api.test/tasks/task-1/move",
@@ -435,9 +619,45 @@ describe("createTaskApi", () => {
           parentId: "parent-1",
           projectId: "project-1",
           sectionId: null,
-          beforeId: null,
-          afterId: null
+          beforeId: "before-1",
+          afterId: "after-1"
         })
+      })
+    );
+  });
+
+  it("updates projects and task patches with JSON requests", async () => {
+    const fetchMock = vi.fn(async (url: string) =>
+      new Response(
+        JSON.stringify(
+          url.includes("/projects/")
+            ? { project: project({ id: "project-1", title: "Launch" }) }
+            : { task: task({ id: "task-1", title: "Renamed" }) }
+        ),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        }
+      )
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createTaskApi("http://api.test").updateProject("project-1", "Launch");
+    await createTaskApi("http://api.test").updateTask("task-1", Object.freeze({ title: "Renamed" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://api.test/projects/project-1",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ title: "Launch" })
+      })
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://api.test/tasks/task-1",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ title: "Renamed" })
       })
     );
   });

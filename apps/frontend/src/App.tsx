@@ -1,17 +1,48 @@
+import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from "@dnd-kit/core";
+import type { DragEndEvent } from "@dnd-kit/core";
+import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+import { FloatingFocusManager, FloatingOverlay, useFloating } from "@floating-ui/react";
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { renderTaskMarkdownDocument } from "@todoist-clonse/domain";
-import type { Project, ProjectId, Section, SectionId, TaskNode } from "@todoist-clonse/domain";
-import type { DragEvent, FormEvent, ReactElement } from "react";
+import {
+  computeDropPlacement,
+  computeIndentPlacement,
+  computeOutdentPlacement,
+  renderTaskMarkdownDocument
+} from "@todoist-clonse/domain";
+import type { Project, ProjectId, Section, SectionId, Task, TaskId, TaskNode } from "@todoist-clonse/domain";
+import clsx from "clsx";
+import JSZip from "jszip";
+import { Archive, ClipboardCopy, Code2, Database, Edit3, Inbox, Plus, Trash2, X } from "lucide-react";
+import type { DragEvent, FormEvent, KeyboardEvent, ReactElement } from "react";
 import { useState } from "react";
+import "./vendor/bootstrap.min.css";
 import { createTaskApi, createToolsApi } from "./api";
 import type { TaskApi, ToolsApi } from "./api";
-import "./styles.css";
+import "./App.css";
 
 const taskQueryKey = Object.freeze(["tasks"]);
 const projectQueryKey = Object.freeze(["projects"]);
 const sectionQueryKey = Object.freeze(["sections"]);
 const tablesQueryKey = Object.freeze(["tools", "tables"]);
 const toolsEnabled = import.meta.env.DEV || import.meta.env.MODE === "test";
+
+type DragPlacement = "before" | "inside" | "after" | "outdent";
+
+type DropZoneId = "inbox" | `project:${ProjectId}` | `section:${SectionId}`;
+
+type ActiveDragTarget = Readonly<{
+  taskId: TaskId;
+  placement: DragPlacement;
+}>;
+
+type MoveInput = Readonly<{
+  taskId: TaskId;
+  projectId: ProjectId | null;
+  sectionId: SectionId | null;
+  parentId: TaskId | null;
+  beforeId: TaskId | null;
+  afterId: TaskId | null;
+}>;
 
 const renderTaskNodes = (
   tasks: ReadonlyArray<TaskNode>,
@@ -22,10 +53,12 @@ const renderTaskNodes = (
     startSubtask: (task: TaskNode) => void;
     submitSubtask: (task: TaskNode) => void;
     cancelSubtask: () => void;
-    moveTaskIntoTask: (task: TaskNode) => (event: DragEvent<HTMLElement>) => void;
-    markDragTarget: (taskId: string | null) => void;
+    moveTaskOntoTask: (task: TaskNode) => (event: DragEvent<HTMLElement>) => void;
+    markDragTarget: (task: TaskNode) => (event: DragEvent<HTMLElement>) => void;
+    clearDragTarget: () => void;
     finishDragging: () => void;
     startDragging: (task: TaskNode) => (event: DragEvent<HTMLElement>) => void;
+    handleTaskKeys: (task: TaskNode) => (event: KeyboardEvent<HTMLElement>) => void;
     submitEdit: (task: TaskNode) => void;
     cancelEdit: () => void;
     editTaskId: string | null;
@@ -34,7 +67,7 @@ const renderTaskNodes = (
     subtaskParentId: string | null;
     subtaskTitle: string;
     draggingTaskId: string | null;
-    dragTargetTaskId: string | null;
+    activeDragTarget: ActiveDragTarget | null;
     placementOptions: ReadonlyArray<Readonly<{ value: string; label: string }>>;
     setEditTitle: (title: string) => void;
     setEditPlacement: (placement: string) => void;
@@ -46,19 +79,22 @@ const renderTaskNodes = (
     {tasks.map((task) => (
       <li key={task.id} className="task-item">
         <div
-          className={[
+          className={clsx(
             "task-row",
-            actions.draggingTaskId === task.id ? "dragging" : "",
-            actions.dragTargetTaskId === task.id ? "drag-target" : ""
-          ].filter(Boolean).join(" ")}
+            actions.draggingTaskId === task.id && "dragging",
+            actions.activeDragTarget?.taskId === task.id && ["drag-target", `drag-${actions.activeDragTarget.placement}`]
+          )}
           data-task-id={task.id}
+          data-task-depth={depth}
+          tabIndex={0}
           draggable
           onDragStart={actions.startDragging(task)}
           onDragEnd={actions.finishDragging}
-          onDragEnter={() => actions.markDragTarget(task.id)}
-          onDragLeave={() => actions.markDragTarget(null)}
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={actions.moveTaskIntoTask(task)}
+          onDragEnter={actions.markDragTarget(task)}
+          onDragOver={actions.markDragTarget(task)}
+          onDragLeave={actions.clearDragTarget}
+          onDrop={actions.moveTaskOntoTask(task)}
+          onKeyDown={actions.handleTaskKeys(task)}
           style={{ paddingLeft: `${depth * 1.25}rem` }}
         >
           <input
@@ -109,12 +145,15 @@ const renderTaskNodes = (
           )}
           <span className="priority">P{task.priority}</span>
           <button type="button" className="task-action" aria-label={`Edit task ${task.title}`} onClick={() => actions.startEditing(task)}>
+            <Edit3 size={14} aria-hidden="true" />
             Edit
           </button>
           <button type="button" className="task-action" aria-label={`Add subtask to ${task.title}`} onClick={() => actions.startSubtask(task)}>
+            <Plus size={14} aria-hidden="true" />
             Subtask
           </button>
           <button type="button" className="task-action danger" aria-label={`Delete task ${task.title}`} onClick={() => actions.deleteTask(task)}>
+            <Trash2 size={14} aria-hidden="true" />
             Delete
           </button>
         </div>
@@ -195,8 +234,31 @@ const findTaskNode = (tasks: ReadonlyArray<TaskNode>, id: string): TaskNode | nu
     null
   );
 
+const flattenTaskNodes = (tasks: ReadonlyArray<TaskNode>): ReadonlyArray<Task> =>
+  Object.freeze(tasks.flatMap((task) => [task, ...flattenTaskNodes(task.children)]));
+
 const hasDescendant = (task: TaskNode, id: string): boolean =>
   task.children.some((child) => child.id === id || hasDescendant(child, id));
+
+const dragPlacementFromEvent = (event: DragEvent<HTMLElement>): DragPlacement => {
+  const { top, left, height } = event.currentTarget.getBoundingClientRect();
+  const pointerX = Number.isFinite(event.clientX) ? event.clientX : left;
+  const pointerY = Number.isFinite(event.clientY) ? event.clientY : 0;
+  const virtualY = Number.isFinite(height) && height > 0 ? null : pointerY;
+  const y = pointerY - (Number.isFinite(top) ? top : 0);
+  const indent = Number.parseFloat(event.currentTarget.style.paddingLeft || "0");
+  const depth = Number.parseInt(event.currentTarget.dataset.taskDepth ?? "0", 10);
+
+  if ((Number.isFinite(left) && pointerX < left - 18) || (pointerX <= 0 && (indent > 0 || depth > 0))) {
+    return "outdent";
+  }
+
+  if (virtualY !== null) {
+    return virtualY < 35 ? "before" : virtualY > 65 ? "after" : "inside";
+  }
+
+  return y < height * 0.35 ? "before" : y > height * 0.65 ? "after" : "inside";
+};
 
 const slug = (value: string) =>
   value
@@ -281,106 +343,12 @@ const copyText = async (text: string) => {
   textarea.remove();
 };
 
-const crcTable = Object.freeze(
-  Array.from({ length: 256 }, (_, index) => {
-    const step = (value: number, bit: number): number =>
-      bit === 8 ? value >>> 0 : step((value & 1) === 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1, bit + 1);
+const createZipBlob = async (files: ReadonlyArray<Readonly<{ name: string; content: string }>>) => {
+  const zip = new JSZip();
 
-    return step(index, 0);
-  })
-);
+  files.forEach((file) => zip.file(file.name, file.content));
 
-const crc32 = (data: Uint8Array) =>
-  (data.reduce((crc, byte) => crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8), 0xffffffff) ^ 0xffffffff) >>> 0;
-
-const uint16 = (value: number) => Object.freeze([value & 0xff, (value >>> 8) & 0xff]);
-const uint32 = (value: number) => Object.freeze([value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff]);
-
-const concatBytes = (parts: ReadonlyArray<Uint8Array>) => {
-  const size = parts.reduce((total, part) => total + part.length, 0);
-  const output = new Uint8Array(size);
-  parts.reduce((offset, part) => {
-    output.set(part, offset);
-    return offset + part.length;
-  }, 0);
-
-  return output;
-};
-
-type ZipBuildState = Readonly<{
-  offset: number;
-  local: ReadonlyArray<Uint8Array>;
-  central: ReadonlyArray<Uint8Array>;
-}>;
-
-const createZipBlob = (files: ReadonlyArray<Readonly<{ name: string; content: string }>>) => {
-  const encoder = new TextEncoder();
-  const initialZipState: ZipBuildState = Object.freeze({
-    offset: 0,
-    local: Object.freeze([] as ReadonlyArray<Uint8Array>),
-    central: Object.freeze([] as ReadonlyArray<Uint8Array>)
-  });
-  const entries = files.reduce<ZipBuildState>(
-    (state, file) => {
-      const name = encoder.encode(file.name);
-      const content = encoder.encode(file.content);
-      const crc = crc32(content);
-      const localHeader = new Uint8Array([
-        ...uint32(0x04034b50),
-        ...uint16(20),
-        ...uint16(0),
-        ...uint16(0),
-        ...uint16(0),
-        ...uint16(0),
-        ...uint32(crc),
-        ...uint32(content.length),
-        ...uint32(content.length),
-        ...uint16(name.length),
-        ...uint16(0)
-      ]);
-      const centralHeader = new Uint8Array([
-        ...uint32(0x02014b50),
-        ...uint16(20),
-        ...uint16(20),
-        ...uint16(0),
-        ...uint16(0),
-        ...uint16(0),
-        ...uint16(0),
-        ...uint32(crc),
-        ...uint32(content.length),
-        ...uint32(content.length),
-        ...uint16(name.length),
-        ...uint16(0),
-        ...uint16(0),
-        ...uint16(0),
-        ...uint16(0),
-        ...uint32(0),
-        ...uint32(state.offset)
-      ]);
-      const local = concatBytes([localHeader, name, content]);
-      const central = concatBytes([centralHeader, name]);
-
-      return Object.freeze({
-        offset: state.offset + local.length,
-        local: Object.freeze([...state.local, local]),
-        central: Object.freeze([...state.central, central])
-      });
-    },
-    initialZipState
-  );
-  const centralBytes = concatBytes(entries.central);
-  const end = new Uint8Array([
-    ...uint32(0x06054b50),
-    ...uint16(0),
-    ...uint16(0),
-    ...uint16(files.length),
-    ...uint16(files.length),
-    ...uint32(centralBytes.length),
-    ...uint32(entries.offset),
-    ...uint16(0)
-  ]);
-
-  return new Blob([concatBytes([...entries.local, centralBytes, end])], { type: "application/zip" });
+  return zip.generateAsync({ type: "blob" });
 };
 
 const downloadBlob = (blob: Blob, filename: string) => {
@@ -399,12 +367,15 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
   const [title, setTitle] = useState("");
   const [projectTitle, setProjectTitle] = useState("");
   const [sectionTitle, setSectionTitle] = useState("");
+  const [editProjectId, setEditProjectId] = useState<ProjectId | null>(null);
+  const [editProjectTitle, setEditProjectTitle] = useState("");
   const [editSectionId, setEditSectionId] = useState<SectionId | null>(null);
   const [editSectionTitle, setEditSectionTitle] = useState("");
   const [subtaskTitle, setSubtaskTitle] = useState("");
   const [subtaskParentId, setSubtaskParentId] = useState<string | null>(null);
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
-  const [dragTargetTaskId, setDragTargetTaskId] = useState<string | null>(null);
+  const [activeDragTarget, setActiveDragTarget] = useState<ActiveDragTarget | null>(null);
+  const [activeDropZone, setActiveDropZone] = useState<DropZoneId | null>(null);
   const [targetProjectId, setTargetProjectId] = useState<ProjectId | null>(null);
   const [targetSectionId, setTargetSectionId] = useState<SectionId | null>(null);
   const [editTaskId, setEditTaskId] = useState<string | null>(null);
@@ -413,6 +384,11 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
   const [markdownModal, setMarkdownModal] = useState<Readonly<{ title: string; markdown: string }> | null>(null);
   const [copyStatus, setCopyStatus] = useState("");
   const queryClient = useQueryClient();
+  const markdownFloating = useFloating({ open: markdownModal !== null });
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: Object.freeze({ distance: 4 }) }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
 
   const tasks = useQuery({
     queryKey: taskQueryKey,
@@ -451,6 +427,25 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
     onSuccess: (project) => {
       setProjectTitle("");
       queryClient.setQueryData(projectQueryKey, (current: ReadonlyArray<Project> | undefined) => appendById(current, project));
+    }
+  });
+
+  const updateProjectMutation = useMutation({
+    mutationFn: (project: Readonly<{ id: ProjectId; title: string }>) => api.updateProject(project.id, project.title),
+    onSuccess: (project) => {
+      setEditProjectId(null);
+      setEditProjectTitle("");
+      queryClient.setQueryData(projectQueryKey, (current: ReadonlyArray<Project> | undefined) => appendById(current, project));
+    }
+  });
+
+  const deleteProjectMutation = useMutation({
+    mutationFn: (project: Project) => api.deleteProject(project.id).then(() => project),
+    onSuccess: async (project) => {
+      queryClient.setQueryData(projectQueryKey, (current: ReadonlyArray<Project> | undefined) => removeById(current, project.id));
+      setTargetProjectId((current) => (current === project.id ? null : current));
+      await queryClient.invalidateQueries({ queryKey: sectionQueryKey });
+      await queryClient.invalidateQueries({ queryKey: taskQueryKey });
     }
   });
 
@@ -511,11 +506,11 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
   const editMutation = useMutation({
     mutationFn: async (task: TaskNode) => {
       const placement = parsePlacement(editPlacement);
-      const titleTask = await api.updateTaskTitle(task.id, editTitle.trim());
+      const titleTask = await api.updateTask(task.id, Object.freeze({ title: editTitle.trim() }));
 
       return taskPlacement(task) === editPlacement
         ? titleTask
-        : api.moveTask(task.id, placement.projectId, placement.sectionId, null);
+        : api.moveTask(task.id, placement.projectId, placement.sectionId, null, null, null);
     },
     onSuccess: async () => {
       setEditTaskId(null);
@@ -533,11 +528,19 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
   });
 
   const moveMutation = useMutation({
-    mutationFn: (placement: Readonly<{ taskId: string; projectId: ProjectId | null; sectionId: SectionId | null; parentId: string | null }>) =>
-      api.moveTask(placement.taskId, placement.projectId, placement.sectionId, placement.parentId),
+    mutationFn: (placement: MoveInput) =>
+      api.moveTask(
+        placement.taskId,
+        placement.projectId,
+        placement.sectionId,
+        placement.parentId,
+        placement.beforeId,
+        placement.afterId
+      ),
     onSuccess: async () => {
       setDraggingTaskId(null);
-      setDragTargetTaskId(null);
+      setActiveDragTarget(null);
+      setActiveDropZone(null);
       await queryClient.invalidateQueries({ queryKey: taskQueryKey });
     }
   });
@@ -563,6 +566,20 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
     if (trimmed.length > 0) {
       createProjectMutation.mutate(trimmed);
     }
+  };
+
+  const submitProjectEdit = (project: Project) => (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmed = editProjectTitle.trim();
+
+    if (trimmed.length > 0) {
+      updateProjectMutation.mutate(Object.freeze({ id: project.id, title: trimmed }));
+    }
+  };
+
+  const startProjectEdit = (project: Project) => {
+    setEditProjectId(project.id);
+    setEditProjectTitle(project.title);
   };
 
   const submitSection = (event: FormEvent<HTMLFormElement>) => {
@@ -602,12 +619,20 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
     }
   };
 
+  const dropZoneId = (projectId: ProjectId | null, sectionId: SectionId | null): DropZoneId =>
+    sectionId !== null ? `section:${sectionId}` : projectId !== null ? `project:${projectId}` : "inbox";
+
+  const markDropZone = (projectId: ProjectId | null, sectionId: SectionId | null) => (event: DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    setActiveDropZone(dropZoneId(projectId, sectionId));
+  };
+
   const moveDroppedTask = (projectId: ProjectId | null, sectionId: SectionId | null) => (event: DragEvent<HTMLElement>) => {
     event.preventDefault();
     const taskId = event.dataTransfer.getData("text/task-id");
 
     if (taskId.length > 0) {
-      moveMutation.mutate(Object.freeze({ taskId, projectId, sectionId, parentId: null }));
+      moveMutation.mutate(Object.freeze({ taskId, projectId, sectionId, parentId: null, beforeId: null, afterId: null }));
     }
   };
 
@@ -617,28 +642,66 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
 
   const startDragging = (task: TaskNode) => (event: DragEvent<HTMLElement>) => {
     setDraggingTaskId(task.id);
+    setActiveDropZone(null);
     event.dataTransfer.setData("text/task-id", task.id);
   };
 
-  const moveTaskIntoTask = (target: TaskNode) => (event: DragEvent<HTMLElement>) => {
+  const moveTaskOntoTask = (target: TaskNode) => (event: DragEvent<HTMLElement>) => {
     event.preventDefault();
     event.stopPropagation();
 
     const taskId = event.dataTransfer.getData("text/task-id");
     const moved = findTaskNode(allTasks, taskId);
 
-    if (moved === null || moved.id === target.id || hasDescendant(moved, target.id)) {
+    if (moved === null || hasDescendant(moved, target.id)) {
       setDraggingTaskId(null);
-      setDragTargetTaskId(null);
+      setActiveDragTarget(null);
       return;
     }
 
-    moveMutation.mutate(Object.freeze({
-      taskId,
-      projectId: target.projectId,
-      sectionId: target.sectionId,
-      parentId: target.id
-    }));
+    const placement = dragPlacementFromEvent(event);
+    const nextPlacement =
+      placement === "outdent" || (moved.id === target.id && moved.parentId !== null)
+        ? computeOutdentPlacement(flatTasks, moved)
+        : moved.id === target.id
+          ? null
+          : placement === "inside"
+        ? Object.freeze({
+            parentId: target.id,
+            projectId: target.projectId,
+            sectionId: target.sectionId,
+            beforeId: null,
+            afterId: null
+          })
+        : computeDropPlacement(flatTasks, moved, target, placement);
+
+    if (nextPlacement !== null) {
+      moveMutation.mutate(Object.freeze({ taskId, ...nextPlacement }));
+      return;
+    }
+
+    setDraggingTaskId(null);
+    setActiveDragTarget(null);
+  };
+
+  const markDragTarget = (task: TaskNode) => (event: DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    setActiveDragTarget(Object.freeze({ taskId: task.id, placement: dragPlacementFromEvent(event) }));
+  };
+
+  const moveByPlacement = (task: TaskNode, placement: ReturnType<typeof computeIndentPlacement>) => {
+    if (placement !== null) {
+      moveMutation.mutate(Object.freeze({ taskId: task.id, ...placement }));
+    }
+  };
+
+  const handleTaskKeys = (task: TaskNode) => (event: KeyboardEvent<HTMLElement>) => {
+    if (!(event.metaKey || event.ctrlKey) || (event.key !== "ArrowRight" && event.key !== "ArrowLeft")) {
+      return;
+    }
+
+    event.preventDefault();
+    moveByPlacement(task, event.key === "ArrowRight" ? computeIndentPlacement(flatTasks, task) : computeOutdentPlacement(flatTasks, task));
   };
 
   const startEditing = (task: TaskNode) => {
@@ -656,6 +719,7 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
   };
 
   const allTasks = tasks.data ?? Object.freeze([]);
+  const flatTasks = flattenTaskNodes(allTasks);
   const allProjects = projects.data ?? Object.freeze([]);
   const allSections = sections.data ?? Object.freeze([]);
   const inboxSections = allSections.filter((section) => section.projectId === null);
@@ -684,14 +748,16 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
     subtaskParentId,
     subtaskTitle,
     draggingTaskId,
-    dragTargetTaskId,
+    activeDragTarget,
     placementOptions: createPlacementOptions(allProjects, allSections),
-    moveTaskIntoTask,
-    markDragTarget: (taskId: string | null) => setDragTargetTaskId(taskId),
+    moveTaskOntoTask,
+    markDragTarget,
+    clearDragTarget: () => setActiveDragTarget(null),
     finishDragging: () => {
       setDraggingTaskId(null);
-      setDragTargetTaskId(null);
+      setActiveDragTarget(null);
     },
+    handleTaskKeys,
     setEditTitle,
     setEditPlacement,
     setSubtaskTitle
@@ -710,63 +776,130 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
     setCopyStatus("Markdown copied");
   };
 
-  const exportZip = () => {
-    downloadBlob(createZipBlob(allMarkdownFiles(allProjects, allSections, allTasks)), "todoist-clonse-markdown.zip");
+  const finishDndDrag = (_event: DragEndEvent) => {
+    setDraggingTaskId(null);
+    setActiveDragTarget(null);
+    setActiveDropZone(null);
+  };
+
+  const exportZip = async () => {
+    downloadBlob(await createZipBlob(allMarkdownFiles(allProjects, allSections, allTasks)), "todoist-clonse-markdown.zip");
   };
 
   return (
+    <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={finishDndDrag}>
     <main className="shell app-layout">
-      <aside className="sidebar" aria-label="Navigation">
+      <aside className="sidebar card shadow-sm" aria-label="Navigation">
+        <div className="sidebar-brand">
+          <span className="brand-mark">T</span>
+          <strong>Todoist Clonse</strong>
+        </div>
         <button
           type="button"
-          className="nav-button"
+          className={["nav-button", targetProjectId === null && targetSectionId === null ? "active" : ""].filter(Boolean).join(" ")}
           onClick={() => {
             setTargetProjectId(null);
             setTargetSectionId(null);
           }}
-          onDragOver={allowDrop}
+          onDragEnter={markDropZone(null, null)}
+          onDragOver={markDropZone(null, null)}
+          onDragLeave={() => setActiveDropZone(null)}
           onDrop={moveDroppedTask(null, null)}
         >
+          <Inbox size={16} aria-hidden="true" />
           Inbox
         </button>
+        {toolsEnabled ? (
+          <a className="nav-button nav-link-button" href="/tools">
+            <Code2 size={16} aria-hidden="true" />
+            Tools
+          </a>
+        ) : null}
         <div className="sidebar-group">
           <h2>My Projects</h2>
-          {allProjects.map((project) => (
-            <button
-              key={project.id}
-              type="button"
-              className="nav-button"
-              onClick={() => {
-                setTargetProjectId(project.id);
-                setTargetSectionId(null);
-              }}
-              onDragOver={allowDrop}
-              onDrop={moveDroppedTask(project.id, null)}
-            >
-              {project.title}
-            </button>
-          ))}
+          {allProjects.map((project) =>
+            editProjectId === project.id ? (
+              <form key={project.id} className="project-edit-form" onSubmit={submitProjectEdit(project)}>
+                <label htmlFor={`project-edit-${project.id}`}>Project title</label>
+                <input
+                  id={`project-edit-${project.id}`}
+                  value={editProjectTitle}
+                  onChange={(event) => setEditProjectTitle(event.target.value)}
+                />
+                <button type="submit">Save project</button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditProjectId(null);
+                    setEditProjectTitle("");
+                  }}
+                >
+                  Cancel
+                </button>
+              </form>
+            ) : (
+              <div key={project.id} className="project-nav-row">
+                <button
+                  type="button"
+                  className={clsx(
+                    "nav-button",
+                    targetProjectId === project.id && "active",
+                    activeDropZone === projectPlacement(project.id) && "drop-active"
+                  )}
+                  onClick={() => {
+                    setTargetProjectId(project.id);
+                    setTargetSectionId(null);
+                  }}
+                  onDragEnter={markDropZone(project.id, null)}
+                  onDragOver={markDropZone(project.id, null)}
+                  onDragLeave={() => setActiveDropZone(null)}
+                  onDrop={moveDroppedTask(project.id, null)}
+                >
+                  {project.title}
+                </button>
+                <button type="button" aria-label={`Edit project ${project.title}`} onClick={() => startProjectEdit(project)}>
+                  <Edit3 size={14} aria-hidden="true" />
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  className="danger"
+                  aria-label={`Delete project ${project.title}`}
+                  onClick={() => deleteProjectMutation.mutate(project)}
+                >
+                  <Trash2 size={14} aria-hidden="true" />
+                  Delete
+                </button>
+              </div>
+            )
+          )}
         </div>
         <form className="compact-form" onSubmit={submitProject}>
           <label htmlFor="project-title">Project title</label>
           <input id="project-title" value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} />
-          <button type="submit">Add project</button>
+          <button type="submit">
+            <Plus size={16} aria-hidden="true" />
+            Add project
+          </button>
         </form>
+        <button type="button" className="sidebar-export btn btn-success" onClick={exportZip}>
+          <Archive size={16} aria-hidden="true" />
+          Export all ZIP
+        </button>
       </aside>
 
-      <section className="workspace" aria-label="Task manager">
+      <section className="workspace card shadow-sm" aria-label="Task manager">
         <header className="header">
           <p className="eyebrow">Self-hosted MVP</p>
           <h1>{targetProjectId === null ? "Inbox" : taskTargetLabel}</h1>
           <div className="export-actions" aria-label="Markdown export">
             <button type="button" onClick={copyMarkdown}>
+              <ClipboardCopy size={16} aria-hidden="true" />
               Copy markdown
             </button>
             <button type="button" onClick={() => setMarkdownModal(Object.freeze({ title: taskTargetLabel, markdown }))}>
+              <Database size={16} aria-hidden="true" />
               Preview markdown
-            </button>
-            <button type="button" onClick={exportZip}>
-              Export all ZIP
             </button>
             {copyStatus.length > 0 ? <span className="muted">{copyStatus}</span> : null}
           </div>
@@ -784,6 +917,7 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
               placeholder="Add a task"
             />
             <button type="submit" disabled={createMutation.isPending}>
+              <Plus size={16} aria-hidden="true" />
               Add task
             </button>
           </div>
@@ -793,14 +927,24 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
         {tasks.isError ? <p className="error">Unable to load tasks.</p> : null}
         {targetProjectId === null ? (
           <div className="board">
-            <section className="drop-zone" onDragOver={allowDrop} onDrop={moveDroppedTask(null, null)} aria-label="Inbox tasks">
+            <section
+              className={clsx("drop-zone", activeDropZone === "inbox" && "drop-active")}
+              onDragEnter={markDropZone(null, null)}
+              onDragOver={markDropZone(null, null)}
+              onDragLeave={() => setActiveDropZone(null)}
+              onDrop={moveDroppedTask(null, null)}
+              aria-label="Inbox tasks"
+            >
               <h2>Inbox</h2>
               {inboxRootTasks.length > 0 ? renderTaskNodes(inboxRootTasks, taskActions) : <p className="empty">No inbox tasks yet.</p>}
             </section>
             <form className="compact-form inline" onSubmit={submitSection}>
               <label htmlFor="section-title">Section title</label>
               <input id="section-title" value={sectionTitle} onChange={(event) => setSectionTitle(event.target.value)} />
-              <button type="submit">Add section</button>
+              <button type="submit">
+                <Plus size={16} aria-hidden="true" />
+                Add section
+              </button>
             </form>
             {inboxSections.map((section) => {
               const sectionTasks = allTasks.filter((task) => task.projectId === null && task.sectionId === section.id);
@@ -808,8 +952,10 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
               return (
                 <section
                   key={section.id}
-                  className="drop-zone"
-                  onDragOver={allowDrop}
+                  className={clsx("drop-zone", activeDropZone === sectionPlacement(section.id) && "drop-active")}
+                  onDragEnter={markDropZone(null, section.id)}
+                  onDragOver={markDropZone(null, section.id)}
+                  onDragLeave={() => setActiveDropZone(null)}
                   onDrop={moveDroppedTask(null, section.id)}
                   aria-label={`Section ${section.title}`}
                 >
@@ -838,6 +984,7 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
                         <h2>{section.title}</h2>
                         <div className="section-actions">
                           <button type="button" aria-label={`Edit section ${section.title}`} onClick={() => startSectionEdit(section)}>
+                            <Edit3 size={14} aria-hidden="true" />
                             Edit
                           </button>
                           <button
@@ -846,6 +993,7 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
                             aria-label={`Delete section ${section.title}`}
                             onClick={() => deleteSectionMutation.mutate(section)}
                           >
+                            <Trash2 size={14} aria-hidden="true" />
                             Delete
                           </button>
                         </div>
@@ -858,7 +1006,14 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
             })}
           </div>
         ) : (
-          <section className="drop-zone" onDragOver={allowDrop} onDrop={moveDroppedTask(targetProjectId, null)} aria-label={`${taskTargetLabel} tasks`}>
+          <section
+            className={clsx("drop-zone", activeDropZone === projectPlacement(targetProjectId) && "drop-active")}
+            onDragEnter={markDropZone(targetProjectId, null)}
+            onDragOver={markDropZone(targetProjectId, null)}
+            onDragLeave={() => setActiveDropZone(null)}
+            onDrop={moveDroppedTask(targetProjectId, null)}
+            aria-label={`${taskTargetLabel} tasks`}
+          >
             {allTasks.filter((task) => task.projectId === targetProjectId && task.sectionId === null).length > 0 ? (
               renderTaskNodes(
                 allTasks.filter((task) => task.projectId === targetProjectId && task.sectionId === null),
@@ -871,19 +1026,29 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
         )}
       </section>
       {markdownModal !== null ? (
-        <div className="modal-backdrop" role="presentation">
-          <section className="modal" role="dialog" aria-modal="true" aria-label="Markdown preview">
-            <header className="modal-header">
+        <FloatingOverlay className="markdown-modal-backdrop" lockScroll>
+          <FloatingFocusManager context={markdownFloating.context}>
+          <section
+            ref={markdownFloating.refs.setFloating}
+            className="markdown-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Markdown preview"
+          >
+            <header className="markdown-modal-header">
               <h2>{markdownModal.title} markdown</h2>
               <button type="button" onClick={() => setMarkdownModal(null)}>
+                <X size={16} aria-hidden="true" />
                 Close
               </button>
             </header>
             <pre>{markdownModal.markdown}</pre>
           </section>
-        </div>
+          </FloatingFocusManager>
+        </FloatingOverlay>
       ) : null}
     </main>
+    </DndContext>
   );
 };
 
@@ -920,8 +1085,18 @@ export const ToolsPage = ({ api }: Readonly<{ api: ToolsApi }>) => {
 
   if (!toolsEnabled) {
     return (
-      <main className="shell">
-        <section className="workspace" aria-label="Developer tools disabled">
+      <main className="shell app-layout">
+        <aside className="sidebar card shadow-sm" aria-label="Navigation">
+          <div className="sidebar-brand">
+            <span className="brand-mark">T</span>
+            <strong>Todoist Clonse</strong>
+          </div>
+          <a className="nav-button nav-link-button" href="/">
+            <Inbox size={16} aria-hidden="true" />
+            Inbox
+          </a>
+        </aside>
+        <section className="workspace card shadow-sm" aria-label="Developer tools disabled">
           <h1>Not found</h1>
         </section>
       </main>
@@ -932,8 +1107,22 @@ export const ToolsPage = ({ api }: Readonly<{ api: ToolsApi }>) => {
   const tableValue = selectedTable || tableOptions[0] || "";
 
   return (
-    <main className="shell">
-      <section className="workspace tools-panel" aria-label="Database tools">
+    <main className="shell app-layout">
+      <aside className="sidebar card shadow-sm" aria-label="Navigation">
+        <div className="sidebar-brand">
+          <span className="brand-mark">T</span>
+          <strong>Todoist Clonse</strong>
+        </div>
+        <a className="nav-button nav-link-button" href="/">
+          <Inbox size={16} aria-hidden="true" />
+          Inbox
+        </a>
+        <a className="nav-button nav-link-button active" href="/tools">
+          <Code2 size={16} aria-hidden="true" />
+          Tools
+        </a>
+      </aside>
+      <section className="workspace card shadow-sm tools-panel" aria-label="Database tools">
         <header className="header">
           <p className="eyebrow">Development tools</p>
           <h1>Database Tools</h1>

@@ -4,6 +4,8 @@ test("runs a SQL query from the development tools page", async ({ page }) => {
   await page.goto("/tools/");
 
   await expect(page.getByRole("heading", { name: "Database Tools" })).toBeVisible();
+  await expect(page.getByLabel("Navigation").getByRole("link", { name: "Inbox" })).toHaveAttribute("href", "/");
+  await expect(page.getByLabel("Navigation").getByRole("link", { name: "Tools" })).toHaveClass(/active/);
   await page.getByLabel("PostgreSQL query").fill("SELECT 1 AS value;");
   await page.getByRole("button", { name: "Run query" }).click();
 

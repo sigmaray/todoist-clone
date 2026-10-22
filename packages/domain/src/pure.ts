@@ -1,4 +1,4 @@
-import type { Task, TaskId, TaskNode } from "./types";
+import type { ProjectId, SectionId, Task, TaskId, TaskNode } from "./types";
 
 const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 const base = alphabet.length;
@@ -6,7 +6,7 @@ const firstDigit = alphabet[0] ?? "0";
 const middleDigit = alphabet[Math.floor(base / 2)] ?? "V";
 
 const compareTaskOrder = (left: Task, right: Task) =>
-  left.lexicalOrder.localeCompare(right.lexicalOrder) || left.createdAt.localeCompare(right.createdAt);
+  left.lexicalOrder < right.lexicalOrder ? -1 : left.lexicalOrder > right.lexicalOrder ? 1 : left.createdAt.localeCompare(right.createdAt);
 
 const freezeNode = (task: Task, children: ReadonlyArray<TaskNode>): TaskNode =>
   Object.freeze({
@@ -47,6 +47,112 @@ export const generateLexicalOrder = (before: string | null, after: string | null
   };
 
   return findMiddle(0, "");
+};
+
+export type TaskPlacement = Readonly<{
+  parentId: TaskId | null;
+  projectId: ProjectId | null;
+  sectionId: SectionId | null;
+  beforeId: TaskId | null;
+  afterId: TaskId | null;
+}>;
+
+export type DropPosition = "before" | "after";
+
+const sameLocation = (task: Task, parentId: TaskId | null, projectId: ProjectId | null, sectionId: SectionId | null): boolean =>
+  task.parentId === parentId && task.projectId === projectId && task.sectionId === sectionId;
+
+export const listSiblings = (
+  tasks: ReadonlyArray<Task>,
+  parentId: TaskId | null,
+  projectId: ProjectId | null,
+  sectionId: SectionId | null
+): ReadonlyArray<Task> =>
+  Object.freeze(tasks.filter((task) => sameLocation(task, parentId, projectId, sectionId)).toSorted(compareTaskOrder));
+
+const isDescendantOf = (tasks: ReadonlyArray<Task>, ancestorId: TaskId, id: TaskId): boolean => {
+  const task = tasks.find((candidate) => candidate.id === id);
+
+  if (task === undefined || task.parentId === null) {
+    return false;
+  }
+
+  return task.parentId === ancestorId || isDescendantOf(tasks, ancestorId, task.parentId);
+};
+
+export const computeDropPlacement = (
+  tasks: ReadonlyArray<Task>,
+  moved: Task,
+  target: Task,
+  position: DropPosition
+): TaskPlacement | null => {
+  if (moved.id === target.id || isDescendantOf(tasks, moved.id, target.id)) {
+    return null;
+  }
+
+  const placement = Object.freeze({
+    parentId: target.parentId,
+    projectId: target.projectId,
+    sectionId: target.sectionId,
+    beforeId: position === "before" ? target.id : null,
+    afterId: position === "after" ? target.id : null
+  });
+
+  if (!sameLocation(moved, placement.parentId, placement.projectId, placement.sectionId)) {
+    return placement;
+  }
+
+  const siblings = listSiblings(tasks, placement.parentId, placement.projectId, placement.sectionId);
+  const movedIndex = siblings.findIndex((task) => task.id === moved.id);
+  const targetIndex = siblings.findIndex((task) => task.id === target.id);
+
+  if (position === "before" && movedIndex === targetIndex - 1) {
+    return null;
+  }
+
+  if (position === "after" && movedIndex === targetIndex + 1) {
+    return null;
+  }
+
+  return placement;
+};
+
+export const computeIndentPlacement = (tasks: ReadonlyArray<Task>, task: Task): TaskPlacement | null => {
+  const siblings = listSiblings(tasks, task.parentId, task.projectId, task.sectionId);
+  const index = siblings.findIndex((sibling) => sibling.id === task.id);
+  const previous = index > 0 ? siblings[index - 1] : undefined;
+
+  if (previous === undefined) {
+    return null;
+  }
+
+  return Object.freeze({
+    parentId: previous.id,
+    projectId: previous.projectId,
+    sectionId: previous.sectionId,
+    beforeId: null,
+    afterId: null
+  });
+};
+
+export const computeOutdentPlacement = (tasks: ReadonlyArray<Task>, task: Task): TaskPlacement | null => {
+  if (task.parentId === null) {
+    return null;
+  }
+
+  const parent = tasks.find((candidate) => candidate.id === task.parentId);
+
+  if (parent === undefined) {
+    return null;
+  }
+
+  return Object.freeze({
+    parentId: parent.parentId,
+    projectId: parent.projectId,
+    sectionId: parent.sectionId,
+    beforeId: null,
+    afterId: parent.id
+  });
 };
 
 const checkbox = (completed: boolean) => (completed ? "x" : " ");

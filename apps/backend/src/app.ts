@@ -36,6 +36,10 @@ const createProjectSchema = z.object({
   title: z.string().trim().min(1)
 });
 
+const patchProjectSchema = z.object({
+  title: z.string().trim().min(1)
+});
+
 const createSectionSchema = z.object({
   title: z.string().trim().min(1),
   projectId: z.string().nullable().default(null)
@@ -89,6 +93,24 @@ export const createApp = (
     const project = await repository.createProject(result.data.title);
 
     return context.json({ project }, 201);
+  });
+
+  app.patch("/projects/:id", async (context) => {
+    const result = patchProjectSchema.safeParse(await parseJson(context.req.raw));
+
+    if (!result.success) {
+      return context.json({ error: "Invalid project patch" }, 400);
+    }
+
+    const project = await repository.updateProject(context.req.param("id"), result.data.title);
+
+    return project === null ? context.json({ error: "Project not found" }, 404) : context.json({ project });
+  });
+
+  app.delete("/projects/:id", async (context) => {
+    const deleted = await repository.deleteProject(context.req.param("id"));
+
+    return deleted ? context.json({ deleted: true }) : context.json({ error: "Project not found" }, 404);
   });
 
   app.get("/sections", async (context) => {

@@ -1,17 +1,26 @@
-import type { Project, ProjectId, Section, SectionId, Task, TaskNode } from "@todoist-clonse/domain";
+import type { Priority, Project, ProjectId, Section, SectionId, Task, TaskNode } from "@todoist-clonse/domain";
 
 export type TaskApi = Readonly<{
   listTasks: () => Promise<ReadonlyArray<TaskNode>>;
   listProjects: () => Promise<ReadonlyArray<Project>>;
   createProject: (title: string) => Promise<Project>;
+  updateProject: (id: ProjectId, title: string) => Promise<Project>;
+  deleteProject: (id: ProjectId) => Promise<void>;
   listSections: () => Promise<ReadonlyArray<Section>>;
   createSection: (title: string, projectId: ProjectId | null) => Promise<Section>;
   updateSection: (id: SectionId, title: string) => Promise<Section>;
   deleteSection: (id: SectionId) => Promise<void>;
   createTask: (title: string, projectId: ProjectId | null, sectionId: SectionId | null, parentId: string | null) => Promise<Task>;
   patchTask: (id: string, completed: boolean) => Promise<Task>;
-  updateTaskTitle: (id: string, title: string) => Promise<Task>;
-  moveTask: (id: string, projectId: ProjectId | null, sectionId: SectionId | null, parentId: string | null) => Promise<Task>;
+  updateTask: (id: string, patch: Readonly<{ title?: string; priority?: Priority }>) => Promise<Task>;
+  moveTask: (
+    id: string,
+    projectId: ProjectId | null,
+    sectionId: SectionId | null,
+    parentId: string | null,
+    beforeId?: string | null,
+    afterId?: string | null
+  ) => Promise<Task>;
   deleteTask: (id: string) => Promise<void>;
 }>;
 
@@ -49,6 +58,24 @@ export const createTaskApi = (baseUrl = ""): TaskApi =>
       const data = await postJson<{ project: Project }>(`${baseUrl}/projects`, { title });
 
       return data.project;
+    },
+    updateProject: async (id, title) => {
+      const data = await readJson<{ project: Project }>(
+        await fetch(`${baseUrl}/projects/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title })
+        })
+      );
+
+      return data.project;
+    },
+    deleteProject: async (id) => {
+      await readJson<{ deleted: true }>(
+        await fetch(`${baseUrl}/projects/${id}`, {
+          method: "DELETE"
+        })
+      );
     },
     listSections: async () => {
       const data = await readJson<{ sections: ReadonlyArray<Section> }>(await fetch(`${baseUrl}/sections`));
@@ -89,7 +116,7 @@ export const createTaskApi = (baseUrl = ""): TaskApi =>
 
       return data.task;
     },
-    moveTask: async (id, projectId, sectionId, parentId) => {
+    moveTask: async (id, projectId, sectionId, parentId, beforeId = null, afterId = null) => {
       const data = await readJson<{ task: Task }>(
         await fetch(`${baseUrl}/tasks/${id}/move`, {
           method: "PUT",
@@ -98,8 +125,8 @@ export const createTaskApi = (baseUrl = ""): TaskApi =>
             parentId,
             projectId,
             sectionId,
-            beforeId: null,
-            afterId: null
+            beforeId,
+            afterId
           })
         })
       );
@@ -117,12 +144,12 @@ export const createTaskApi = (baseUrl = ""): TaskApi =>
 
       return data.task;
     },
-    updateTaskTitle: async (id, title) => {
+    updateTask: async (id, patch) => {
       const data = await readJson<{ task: Task }>(
         await fetch(`${baseUrl}/tasks/${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title })
+          body: JSON.stringify(patch)
         })
       );
 

@@ -108,4 +108,70 @@ describe("POST /tasks", () => {
       parentId: null
     });
   });
+
+  it("updates and deletes projects, cascading to their sections and tasks", async () => {
+    const agent = request(createTestServer());
+    const projectResponse = await agent.post("/projects").send({ title: "Roadmap" }).expect(201);
+    const projectId = projectResponse.body.project.id;
+    const sectionResponse = await agent.post("/sections").send({ title: "Later", projectId }).expect(201);
+    const sectionTaskResponse = await agent
+      .post("/tasks")
+      .send({ title: "In section", sectionId: sectionResponse.body.section.id })
+      .expect(201);
+    await agent
+      .post("/tasks")
+      .send({ title: "Subtask", parentId: sectionTaskResponse.body.task.id, sectionId: sectionResponse.body.section.id })
+      .expect(201);
+
+    await agent.patch(`/projects/${projectId}`).send({ title: "Roadmap 2" }).expect(200);
+
+    const renamed = await agent.get("/projects").expect(200);
+
+    expect(renamed.body.projects[0]).toMatchObject({ id: projectId, title: "Roadmap 2" });
+
+    await agent.delete(`/projects/${projectId}`).expect(200);
+
+    const projects = await agent.get("/projects").expect(200);
+    const sections = await agent.get("/sections").expect(200);
+    const tasks = await agent.get("/tasks").expect(200);
+
+    expect(projects.body.projects).toEqual([]);
+    expect(sections.body.sections).toEqual([]);
+    expect(tasks.body.tasks).toEqual([]);
+    expect(tasks.body.tree).toEqual([]);
+  });
+
+  it("returns 404 for unknown projects", async () => {
+    const agent = request(createTestServer());
+
+    await agent.patch("/projects/missing").send({ title: "Nope" }).expect(404);
+    await agent.delete("/projects/missing").expect(404);
+  });
+
+  it("reorders tasks with beforeId and afterId", async () => {
+    const agent = request(createTestServer());
+    const create = async (title: string) => (await agent.post("/tasks").send({ title }).expect(201)).body.task as { id: string };
+
+    const first = await create("First");
+    const second = await create("Second");
+    const third = await create("Third");
+
+    await agent
+      .put(`/tasks/${third.id}/move`)
+      .send({ parentId: null, projectId: null, sectionId: null, beforeId: first.id, afterId: null })
+      .expect(200);
+
+    const reordered = await agent.get("/tasks").expect(200);
+
+    expect(reordered.body.tree.map((task: { id: string }) => task.id)).toEqual([third.id, first.id, second.id]);
+
+    await agent
+      .put(`/tasks/${third.id}/move`)
+      .send({ parentId: null, projectId: null, sectionId: null, beforeId: null, afterId: second.id })
+      .expect(200);
+
+    const finalOrder = await agent.get("/tasks").expect(200);
+
+    expect(finalOrder.body.tree.map((task: { id: string }) => task.id)).toEqual([first.id, second.id, third.id]);
+  });
 });
