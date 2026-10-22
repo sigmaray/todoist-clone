@@ -16,7 +16,6 @@ const task = (values: Partial<Task> & Pick<Task, "id" | "title" | "lexicalOrder"
     labels: Object.freeze([]),
     comments: Object.freeze([]),
     completed: false,
-    priority: 4,
     parentId: null,
     projectId: null,
     sectionId: null,
@@ -130,7 +129,7 @@ describe("computeOutdentPlacement", () => {
 describe("renderTaskMarkdownDocument", () => {
   it("renders nested tasks as a markdown checklist", () => {
     const tree = buildTaskTree([
-      task({ id: "root", title: "Plan release", lexicalOrder: "a", completed: true, priority: 1 }),
+      task({ id: "root", title: "Plan release", lexicalOrder: "a", completed: true }),
       task({ id: "child", title: "Write notes", parentId: "root", lexicalOrder: "a" })
     ]);
 
@@ -138,8 +137,8 @@ describe("renderTaskMarkdownDocument", () => {
       [
         "# Inbox",
         "",
-        "- [x] Plan release (P1)",
-        "  - [ ] Write notes (P4)",
+        "- [x] Plan release",
+        "  - [ ] Write notes",
         ""
       ].join("\n")
     );
@@ -150,7 +149,7 @@ describe("renderTaskMarkdownDocument", () => {
     const section = buildTaskTree([task({ id: "section-task", title: "Section task", lexicalOrder: "a" })]);
 
     const markdown = renderTaskMarkdownDocument("Project", root, [{ title: "Planning", tasks: section }]);
-    expect(markdown).toBe(["# Project", "", "- [ ] Root task (P4)", "", "## Planning", "", "- [ ] Section task (P4)", ""].join("\n"));
+    expect(markdown).toBe(["# Project", "", "- [ ] Root task", "", "## Planning", "", "- [ ] Section task", ""].join("\n"));
     expect(markdown.match(/^# /gm)).toHaveLength(1);
   });
 });

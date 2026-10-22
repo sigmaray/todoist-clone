@@ -2,8 +2,6 @@ export type TaskId = string;
 export type ProjectId = string;
 export type SectionId = string;
 
-export type Priority = 1 | 2 | 3 | 4;
-
 export type Task = Readonly<{
   id: TaskId;
   title: string;
@@ -12,7 +10,6 @@ export type Task = Readonly<{
   labels: ReadonlyArray<string>;
   comments: ReadonlyArray<Readonly<{ id: string; body: string; createdAt: string }>>;
   completed: boolean;
-  priority: Priority;
   parentId: TaskId | null;
   projectId: ProjectId | null;
   sectionId: SectionId | null;
@@ -28,6 +25,7 @@ export type TaskNode = Task & Readonly<{
 export type Project = Readonly<{
   id: ProjectId;
   title: string;
+  description: string;
   archived: boolean;
   lexicalOrder: string;
   createdAt: string;

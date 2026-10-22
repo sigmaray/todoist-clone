@@ -1,11 +1,12 @@
-import { boolean, integer, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
 export const appSettings = pgTable("app_settings", {
   id: text("id").primaryKey(),
   confirmDelete: boolean("confirm_delete").notNull().default(true),
   accessMode: text("access_mode").notNull().default("anonymous"),
   username: text("username"),
-  passwordHash: text("password_hash")
+  passwordHash: text("password_hash"),
+  inboxDescription: text("inbox_description").notNull().default("")
 });
 
 export const sessions = pgTable("sessions", {
@@ -16,6 +17,7 @@ export const sessions = pgTable("sessions", {
 export const projects = pgTable("projects", {
   id: text("id").primaryKey(),
   title: text("title").notNull(),
+  description: text("description").notNull().default(""),
   archived: boolean("archived").notNull().default(false),
   lexicalOrder: text("lexical_order").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -39,7 +41,6 @@ export const tasks = pgTable("tasks", {
   labels: text("labels").array().notNull().default([]),
   comments: jsonb("comments").notNull().default([]),
   completed: boolean("completed").notNull().default(false),
-  priority: integer("priority").notNull().default(4),
   parentId: text("parent_id"),
   projectId: text("project_id"),
   sectionId: text("section_id"),

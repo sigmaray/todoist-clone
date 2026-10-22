@@ -24,7 +24,9 @@ const quoteIdentifier = (name: string) => {
 const migrationFiles = Object.freeze([
   new URL("../drizzle/0000_create_tasks.sql", import.meta.url),
   new URL("../drizzle/0001_settings_auth.sql", import.meta.url),
-  new URL("../drizzle/0002_task_details_archives.sql", import.meta.url)
+  new URL("../drizzle/0002_task_details_archives.sql", import.meta.url),
+  new URL("../drizzle/0003_remove_task_priorities.sql", import.meta.url),
+  new URL("../drizzle/0004_scope_descriptions.sql", import.meta.url)
 ]);
 const protectedTables = Object.freeze(["app_settings", "sessions"]);
 
@@ -32,14 +34,12 @@ const seedTasks = Object.freeze([
   Object.freeze({
     id: "seed-inbox",
     title: "Review seeded task",
-    priority: 2,
     parentId: null,
     lexicalOrder: "U"
   }),
   Object.freeze({
     id: "seed-child",
     title: "Nested seeded task",
-    priority: 3,
     parentId: "seed-inbox",
     lexicalOrder: "U"
   })
@@ -99,7 +99,9 @@ const dropAllTables = async (sql: postgres.Sql) => {
 };
 
 const migrate = async (sql: postgres.Sql) => {
-  await Promise.all(migrationFiles.map(async (migrationFile) => sql.unsafe(await readFile(migrationFile, "utf8"))));
+  for (const migrationFile of migrationFiles) {
+    await sql.unsafe(await readFile(migrationFile, "utf8"));
+  }
 };
 
 const seed = async (sql: postgres.Sql) => {
@@ -107,12 +109,11 @@ const seed = async (sql: postgres.Sql) => {
   await Promise.all(
     seedTasks.map((task) =>
       sql`
-        INSERT INTO tasks (id, title, completed, priority, parent_id, lexical_order)
-        VALUES (${task.id}, ${task.title}, false, ${task.priority}, ${task.parentId}, ${task.lexicalOrder})
+        INSERT INTO tasks (id, title, completed, parent_id, lexical_order)
+        VALUES (${task.id}, ${task.title}, false, ${task.parentId}, ${task.lexicalOrder})
         ON CONFLICT (id) DO UPDATE SET
           title = EXCLUDED.title,
           completed = EXCLUDED.completed,
-          priority = EXCLUDED.priority,
           parent_id = EXCLUDED.parent_id,
           lexical_order = EXCLUDED.lexical_order,
           updated_at = now()

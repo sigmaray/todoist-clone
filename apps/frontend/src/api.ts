@@ -1,21 +1,24 @@
-import type { Priority, Project, ProjectId, Section, SectionId, Task, TaskNode } from "@todoist-clone/domain";
+import type { Project, ProjectId, Section, SectionId, Task, TaskNode } from "@todoist-clone/domain";
 
 export type TaskApi = Readonly<{
   listTasks: () => Promise<ReadonlyArray<TaskNode>>;
   listProjects: () => Promise<ReadonlyArray<Project>>;
   createProject: (title: string) => Promise<Project>;
   reorderProject: (id: ProjectId, beforeId: ProjectId | null, afterId: ProjectId | null) => Promise<Project>;
-  updateProject: (id: ProjectId, title: string) => Promise<Project>;
+  updateProject: (id: ProjectId, patch: Readonly<{ title?: string; description?: string }>) => Promise<Project>;
+  getInboxDescription: () => Promise<string>;
+  updateInboxDescription: (description: string) => Promise<void>;
   duplicateProject: (id: ProjectId) => Promise<Project>;
   archiveProject: (id: ProjectId, archived: boolean) => Promise<Project>;
   deleteProject: (id: ProjectId) => Promise<void>;
   listSections: () => Promise<ReadonlyArray<Section>>;
   createSection: (title: string, projectId: ProjectId | null) => Promise<Section>;
+  reorderSection: (id: SectionId, beforeId: SectionId | null, afterId: SectionId | null) => Promise<Section>;
   updateSection: (id: SectionId, title: string) => Promise<Section>;
   deleteSection: (id: SectionId) => Promise<void>;
   createTask: (title: string, projectId: ProjectId | null, sectionId: SectionId | null, parentId: string | null) => Promise<Task>;
   patchTask: (id: string, completed: boolean) => Promise<Task>;
-  updateTask: (id: string, patch: Readonly<{ title?: string; description?: string; dueDate?: string | null; labels?: ReadonlyArray<string>; comments?: Task["comments"]; priority?: Priority }>) => Promise<Task>;
+  updateTask: (id: string, patch: Readonly<{ title?: string; description?: string; dueDate?: string | null; labels?: ReadonlyArray<string>; comments?: Task["comments"] }>) => Promise<Task>;
   moveTask: (
     id: string,
     projectId: ProjectId | null,
@@ -114,16 +117,20 @@ export const createTaskApi = (baseUrl = ""): ApplicationApi =>
       const data = await readJson<{ project: Project }>(await fetch(`${baseUrl}/projects/${id}/order`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ beforeId, afterId }) }));
       return data.project;
     },
-    updateProject: async (id, title) => {
+    updateProject: async (id, patch) => {
       const data = await readJson<{ project: Project }>(
         await fetch(`${baseUrl}/projects/${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title })
+          body: JSON.stringify(patch)
         })
       );
 
       return data.project;
+    },
+    getInboxDescription: async () => (await readJson<{ description: string }>(await fetch(`${baseUrl}/inbox/description`))).description,
+    updateInboxDescription: async (description) => {
+      await readJson<{ description: string }>(await fetch(`${baseUrl}/inbox/description`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ description }) }));
     },
     duplicateProject: async (id) => {
       const data = await postJson<{ project: Project }>(`${baseUrl}/projects/${id}/duplicate`);
@@ -148,6 +155,10 @@ export const createTaskApi = (baseUrl = ""): ApplicationApi =>
     createSection: async (title, projectId) => {
       const data = await postJson<{ section: Section }>(`${baseUrl}/sections`, { title, projectId });
 
+      return data.section;
+    },
+    reorderSection: async (id, beforeId, afterId) => {
+      const data = await readJson<{ section: Section }>(await fetch(`${baseUrl}/sections/${id}/order`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ beforeId, afterId }) }));
       return data.section;
     },
     updateSection: async (id, title) => {

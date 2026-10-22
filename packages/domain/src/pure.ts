@@ -159,7 +159,7 @@ const checkbox = (completed: boolean) => (completed ? "x" : " ");
 
 const renderTaskMarkdown = (task: TaskNode, depth: number): ReadonlyArray<string> =>
   Object.freeze([
-    `${"  ".repeat(depth)}- [${checkbox(task.completed)}] ${task.title} (P${task.priority})`,
+    `${"  ".repeat(depth)}- [${checkbox(task.completed)}] ${task.title}`,
     ...task.children.flatMap((child) => renderTaskMarkdown(child, depth + 1))
   ]);
 

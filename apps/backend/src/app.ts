@@ -10,11 +10,8 @@ import { createMemorySettingsRepository, toPublicSettings } from "./settings";
 import type { SettingsRepository } from "./settings";
 import { createToolsRouter } from "./tools";
 
-const prioritySchema = z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]);
-
 const createTaskSchema = z.object({
   title: z.string().trim().min(1),
-  priority: prioritySchema.default(4),
   parentId: z.string().nullable().default(null),
   projectId: z.string().nullable().default(null),
   sectionId: z.string().nullable().default(null)
@@ -27,7 +24,6 @@ const patchTaskSchema = z.object({
   labels: z.array(z.string().trim().min(1).max(64)).max(50).optional(),
   comments: z.array(z.object({ id: z.string(), body: z.string().min(1).max(5000), createdAt: z.string() })).optional(),
   completed: z.boolean().optional(),
-  priority: prioritySchema.optional(),
   projectId: z.string().nullable().optional(),
   sectionId: z.string().nullable().optional()
 });
@@ -45,10 +41,12 @@ const createProjectSchema = z.object({
 });
 
 const patchProjectSchema = z.object({
-  title: z.string().trim().min(1)
-});
+  title: z.string().trim().min(1).optional(),
+  description: z.string().max(20000).optional()
+}).refine((patch) => patch.title !== undefined || patch.description !== undefined);
 
 const reorderProjectSchema = z.object({ beforeId: z.string().nullable(), afterId: z.string().nullable() });
+const reorderSectionSchema = reorderProjectSchema;
 
 const createSectionSchema = z.object({
   title: z.string().trim().min(1),
@@ -70,6 +68,7 @@ const updateSettingsSchema = z.object({
   username: z.string().trim().min(1).max(64).nullable().optional(),
   password: z.string().min(12).max(128).optional()
 });
+const inboxDescriptionSchema = z.object({ description: z.string().max(20000) });
 
 const parseJson = async (request: Request) => {
   const contentType = request.headers.get("content-type") ?? "";
@@ -207,6 +206,14 @@ export const createApp = (
     return context.json({ settings: toPublicSettings(settings) });
   });
 
+  app.get("/inbox/description", async (context) => context.json({ description: await settingsRepository.getInboxDescription() }));
+  app.put("/inbox/description", async (context) => {
+    const result = inboxDescriptionSchema.safeParse(await parseJson(context.req.raw));
+    if (!result.success) return context.json({ error: "Invalid Inbox description" }, 400);
+    await settingsRepository.saveInboxDescription(result.data.description);
+    return context.json({ description: result.data.description });
+  });
+
   if (options.databaseUrl !== undefined) {
     app.route("/tools-api", createToolsRouter(options.databaseUrl, options.mode ?? "development"));
   }
@@ -242,7 +249,7 @@ export const createApp = (
       return context.json({ error: "Invalid project patch" }, 400);
     }
 
-    const project = await repository.updateProject(context.req.param("id"), result.data.title);
+    const project = await repository.updateProject(context.req.param("id"), result.data);
 
     return project === null ? context.json({ error: "Project not found" }, 404) : context.json({ project });
   });
@@ -290,6 +297,13 @@ export const createApp = (
     return context.json({ section }, 201);
   });
 
+  app.patch("/sections/:id/order", async (context) => {
+    const result = reorderSectionSchema.safeParse(await parseJson(context.req.raw));
+    if (!result.success) return context.json({ error: "Invalid section order" }, 400);
+    const section = await repository.reorderSection(context.req.param("id"), result.data.beforeId, result.data.afterId);
+    return section === null ? context.json({ error: "Section not found" }, 404) : context.json({ section });
+  });
+
   app.patch("/sections/:id", async (context) => {
     const result = patchSectionSchema.safeParse(await parseJson(context.req.raw));
 
@@ -317,7 +331,6 @@ export const createApp = (
 
     const task = await repository.create(
       result.data.title,
-      result.data.priority,
       result.data.parentId,
       result.data.projectId,
       result.data.sectionId

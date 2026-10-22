@@ -1,4 +1,4 @@
-export type { Priority, Project, ProjectId, Section, SectionId, Task, TaskId, TaskNode } from "./types";
+export type { Project, ProjectId, Section, SectionId, Task, TaskId, TaskNode } from "./types";
 export {
   buildTaskTree,
   computeDropPlacement,

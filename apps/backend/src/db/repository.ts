@@ -1,5 +1,5 @@
 import { generateLexicalOrder } from "@todoist-clone/domain";
-import type { Priority, Project, ProjectId, Section, SectionId, Task, TaskId } from "@todoist-clone/domain";
+import type { Project, ProjectId, Section, SectionId, Task, TaskId } from "@todoist-clone/domain";
 import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
@@ -22,7 +22,6 @@ const toTask = (row: TaskRow): Task =>
     labels: Object.freeze(row.labels),
     comments: Object.freeze(row.comments as Task["comments"]),
     completed: row.completed,
-    priority: row.priority as Priority,
     parentId: row.parentId,
     projectId: row.projectId,
     sectionId: row.sectionId,
@@ -35,6 +34,7 @@ const toProject = (row: ProjectRow): Project =>
   Object.freeze({
     id: row.id,
     title: row.title,
+    description: row.description,
     archived: row.archived,
     lexicalOrder: row.lexicalOrder,
     createdAt: normalizeDate(row.createdAt),
@@ -145,11 +145,11 @@ export const createPostgresTaskRepository = (databaseUrl: string): TaskRepositor
       const rows = await db.update(projectsTable).set({ lexicalOrder: generateLexicalOrder(low, high), updatedAt: new Date() }).where(eq(projectsTable.id, id)).returning();
       return firstProject(rows);
     },
-    updateProject: async (id, title) => {
+    updateProject: async (id, patch) => {
       const rows = await db
         .update(projectsTable)
         .set({
-          title,
+          ...patch,
           updatedAt: new Date()
         })
         .where(eq(projectsTable.id, id))
@@ -197,7 +197,7 @@ export const createPostgresTaskRepository = (databaseUrl: string): TaskRepositor
       const sourceTasks = await db.select().from(tasksTable).where(eq(tasksTable.projectId, id)).orderBy(rowOrder);
       const createdAt = new Date();
       const newProjectId = crypto.randomUUID();
-      const copiedProject = await db.insert(projectsTable).values({ id: newProjectId, title: `${source.title} copy`, archived: false, lexicalOrder: generateLexicalOrder(source.lexicalOrder, null) }).returning();
+      const copiedProject = await db.insert(projectsTable).values({ id: newProjectId, title: `${source.title} copy`, description: source.description, archived: false, lexicalOrder: generateLexicalOrder(source.lexicalOrder, null) }).returning();
       const sectionMap = new Map(sourceSections.map((section) => [section.id, crypto.randomUUID()]));
       if (sourceSections.length) await db.insert(sectionsTable).values(sourceSections.map((section) => ({ id: sectionMap.get(section.id)!, title: section.title, projectId: newProjectId, lexicalOrder: section.lexicalOrder })));
       const taskMap = new Map(sourceTasks.map((task) => [task.id, crypto.randomUUID()]));
@@ -213,6 +213,19 @@ export const createPostgresTaskRepository = (databaseUrl: string): TaskRepositor
       const rows = await db.select().from(sectionsTable).orderBy(sectionOrder);
 
       return Object.freeze(rows.map(toSection));
+    },
+    reorderSection: async (id, beforeId, afterId) => {
+      const current = await db.select().from(sectionsTable).where(eq(sectionsTable.id, id));
+      const section = current[0];
+      if (!section) return null;
+      const ordered = await db.select().from(sectionsTable).where(nullableEq(sectionsTable.projectId, section.projectId)).orderBy(sectionOrder);
+      const siblings = ordered.filter((item) => item.id !== id);
+      const beforeIndex = beforeId === null ? -1 : siblings.findIndex((item) => item.id === beforeId);
+      const afterIndex = afterId === null ? -1 : siblings.findIndex((item) => item.id === afterId);
+      const low = afterIndex >= 0 ? siblings[afterIndex]?.lexicalOrder ?? null : beforeId === null && afterId === null ? siblings.at(-1)?.lexicalOrder ?? null : null;
+      const high = beforeIndex >= 0 ? siblings[beforeIndex]?.lexicalOrder ?? null : null;
+      const rows = await db.update(sectionsTable).set({ lexicalOrder: generateLexicalOrder(low, high), updatedAt: new Date() }).where(eq(sectionsTable.id, id)).returning();
+      return firstSection(rows);
     },
     createSection: async (title, projectId) => {
       const siblings = await db
@@ -270,7 +283,7 @@ export const createPostgresTaskRepository = (databaseUrl: string): TaskRepositor
 
       return true;
     },
-    create: async (title, priority, parentId, projectId, sectionId) => {
+    create: async (title, parentId, projectId, sectionId) => {
       const id = crypto.randomUUID();
       const lexicalOrder = await findSiblingOrder(db, parentId, projectId, sectionId, null, null);
       const rows = await db
@@ -279,7 +292,6 @@ export const createPostgresTaskRepository = (databaseUrl: string): TaskRepositor
           id,
           title,
           completed: false,
-          priority,
           parentId,
           projectId,
           sectionId,

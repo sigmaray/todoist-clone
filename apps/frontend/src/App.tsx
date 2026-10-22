@@ -24,6 +24,7 @@ import "./App.css";
 const taskQueryKey = Object.freeze(["tasks"]);
 const projectQueryKey = Object.freeze(["projects"]);
 const sectionQueryKey = Object.freeze(["sections"]);
+const inboxDescriptionQueryKey = Object.freeze(["inbox-description"]);
 const tablesQueryKey = Object.freeze(["tools", "tables"]);
 const settingsQueryKey = Object.freeze(["app-settings"]);
 const authStatusQueryKey = Object.freeze(["auth-status"]);
@@ -296,6 +297,7 @@ const getDateShortcut = (shortcut: "Today" | "Tomorrow" | "This weekend" | "Next
 
 const DatePickerPanel = ({ value, onChange, inputLabel }: Readonly<{ value: string; onChange: (value: string) => void; inputLabel: string }>) => {
   const [month, setMonth] = useState(() => (value || getDateShortcut("Today")).slice(0, 7));
+  const today = toLocalIsoDate(new Date());
   useEffect(() => { if (value) setMonth(value.slice(0, 7)); }, [value]);
   const [yearText, monthText] = month.split("-");
   const year = Number(yearText);
@@ -328,7 +330,7 @@ const DatePickerPanel = ({ value, onChange, inputLabel }: Readonly<{ value: stri
         {days.map((day, index) => {
           if (day === null) return <span role="gridcell" aria-hidden="true" className="date-picker-empty" key={`empty-${index}`} />;
           const date = `${month}-${String(day).padStart(2, "0")}`;
-          return <span role="gridcell" key={date}><button type="button" aria-label={`Choose date ${formatDate(date)}`} aria-pressed={value === date} className={value === date ? "selected" : ""} onClick={() => onChange(date)}>{day}</button></span>;
+          return <span role="gridcell" key={date}><button type="button" aria-label={`Choose date ${formatDate(date)}`} aria-current={today === date ? "date" : undefined} aria-pressed={value === date} className={clsx(value === date && "selected", today === date && "today")} onClick={() => onChange(date)}>{day}</button></span>;
         })}
       </div>
     </div>
@@ -535,6 +537,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const [currentPath, setCurrentPath] = useState(window.location.pathname);
   const [dateView, setDateView] = useState<"list" | "calendar">("list");
   const [calendarMonth, setCalendarMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [activeCalendarDate, setActiveCalendarDate] = useState<string | null>(null);
   const [addTaskOpen, setAddTaskOpen] = useState(false);
   const [addTaskTitle, setAddTaskTitle] = useState("");
   const [addTaskDescription, setAddTaskDescription] = useState("");
@@ -557,8 +560,10 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
   const [activeDragTarget, setActiveDragTarget] = useState<ActiveDragTarget | null>(null);
   const [activeDropZone, setActiveDropZone] = useState<DropZoneId | null>(null);
-  const [activeProjectDropId, setActiveProjectDropId] = useState<ProjectId | null>(null);
+  const [activeProjectDrop, setActiveProjectDrop] = useState<Readonly<{ id: ProjectId; position: "before" | "after" }> | null>(null);
   const [draggingProjectId, setDraggingProjectId] = useState<ProjectId | null>(null);
+  const [activeSectionDrop, setActiveSectionDrop] = useState<Readonly<{ id: SectionId; position: "before" | "after" }> | null>(null);
+  const [draggingSectionId, setDraggingSectionId] = useState<SectionId | null>(null);
   const [targetProjectId, setTargetProjectId] = useState<ProjectId | null>(() => new URLSearchParams(window.location.search).get("project"));
   const [targetSectionId, setTargetSectionId] = useState<SectionId | null>(null);
   const [editTaskId, setEditTaskId] = useState<string | null>(null);
@@ -582,6 +587,8 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingCommentBody, setEditingCommentBody] = useState("");
   const [openProjectMenuId, setOpenProjectMenuId] = useState<ProjectId | null>(null);
+  const [editingScopeDescription, setEditingScopeDescription] = useState(false);
+  const [scopeDescriptionDraft, setScopeDescriptionDraft] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
   const queryClient = useQueryClient();
   const markdownFloating = useFloating({ open: markdownModal !== null });
@@ -593,6 +600,20 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   useEffect(() => { const syncPath = () => setCurrentPath(window.location.pathname); window.addEventListener("popstate", syncPath); return () => window.removeEventListener("popstate", syncPath); }, []);
   useEffect(() => { if (addingProject) projectCreateInputRef.current?.focus(); }, [addingProject]);
   useEffect(() => { if (addingSection) sectionCreateInputRef.current?.focus(); }, [addingSection]);
+  useEffect(() => {
+    if (openProjectMenuId === null) return;
+    const closeOnOutsidePointer = (event: globalThis.PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest(".project-menu") === null) setOpenProjectMenuId(null);
+    };
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") setOpenProjectMenuId(null); };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [openProjectMenuId]);
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape" && detailsTaskId !== null && editingDetailField === null && !datePickerOpen && detailLabelInput === "") setDetailsTaskId(null);
@@ -627,6 +648,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     queryKey: settingsQueryKey,
     queryFn: api.getSettings
   });
+  const inboxDescriptionQuery = useQuery({ queryKey: inboxDescriptionQueryKey, queryFn: api.getInboxDescription });
 
   const confirmDeletion = (message: string) => settings.data?.confirmDelete === false || window.confirm(message);
 
@@ -661,7 +683,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   });
 
   const updateProjectMutation = useMutation({
-    mutationFn: (project: Readonly<{ id: ProjectId; title: string }>) => api.updateProject(project.id, project.title),
+    mutationFn: (project: Readonly<{ id: ProjectId; title?: string; description?: string }>) => api.updateProject(project.id, project),
     onSuccess: (project) => {
       setEditProjectId(null);
       setEditProjectTitle("");
@@ -693,6 +715,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const archiveProjectMutation = useMutation({ mutationFn: ({ id, archived }: Readonly<{ id: ProjectId; archived: boolean }>) => api.archiveProject(id, archived), onSuccess: (project) => queryClient.setQueryData(projectQueryKey, (current: ReadonlyArray<Project> | undefined) => replaceById(current, project)) });
 
   const reorderProjectMutation = useMutation({ mutationFn: ({ id, beforeId, afterId }: Readonly<{ id: ProjectId; beforeId: ProjectId | null; afterId: ProjectId | null }>) => api.reorderProject(id, beforeId, afterId), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: projectQueryKey }); } });
+  const reorderSectionMutation = useMutation({ mutationFn: ({ id, beforeId, afterId }: Readonly<{ id: SectionId; beforeId: SectionId | null; afterId: SectionId | null }>) => api.reorderSection(id, beforeId, afterId), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: sectionQueryKey }); } });
 
   const requestProjectDelete = (project: Project) => {
     if (confirmDeletion(`Delete project “${project.title}” and all its tasks?`)) {
@@ -891,6 +914,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     sectionId !== null ? `section:${sectionId}` : projectId !== null ? `project:${projectId}` : "inbox";
 
   const markDropZone = (projectId: ProjectId | null, sectionId: SectionId | null) => (event: DragEvent<HTMLElement>) => {
+    if (event.dataTransfer?.types && !event.dataTransfer.types.includes("text/task-id")) return;
     event.preventDefault();
     setActiveDropZone(dropZoneId(projectId, sectionId));
   };
@@ -902,6 +926,63 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     if (taskId.length > 0) {
       moveMutation.mutate(Object.freeze({ taskId, projectId, sectionId, parentId: null, beforeId: null, afterId: null }));
     }
+  };
+
+  const startSectionDrag = (section: Section) => (event: DragEvent<HTMLElement>) => {
+    setDraggingSectionId(section.id);
+    event.dataTransfer.setData("application/x-section-id", section.id);
+    event.dataTransfer.effectAllowed = "move";
+  };
+  const markSectionDrop = (section: Section) => (event: DragEvent<HTMLElement>) => {
+    if (!event.dataTransfer.types.includes("application/x-section-id")) return;
+    event.preventDefault();
+    const rect = event.currentTarget.getBoundingClientRect();
+    setActiveSectionDrop(Object.freeze({ id: section.id, position: event.clientY < rect.top + rect.height / 2 ? "before" : "after" }));
+  };
+  const dropSection = (section: Section, siblings: ReadonlyArray<Section>) => (event: DragEvent<HTMLElement>) => {
+    const draggedId = event.dataTransfer.getData("application/x-section-id");
+    if (!draggedId || draggedId === section.id) return;
+    event.preventDefault();
+    const position = event.clientY < event.currentTarget.getBoundingClientRect().top + event.currentTarget.getBoundingClientRect().height / 2 ? "before" : "after";
+    const ordered = siblings.filter((item) => item.id !== draggedId);
+    const index = ordered.findIndex((item) => item.id === section.id);
+    const beforeId = position === "before" ? section.id : ordered[index + 1]?.id ?? null;
+    const afterId = position === "before" ? ordered[index - 1]?.id ?? null : section.id;
+    setDraggingSectionId(null); setActiveSectionDrop(null);
+    reorderSectionMutation.mutate({ id: draggedId, beforeId, afterId });
+  };
+  const markProjectDrop = (project: Project) => (event: DragEvent<HTMLElement>) => {
+    if (!event.dataTransfer.types.includes("application/x-project-id")) return;
+    event.preventDefault();
+    const rect = event.currentTarget.getBoundingClientRect();
+    setActiveProjectDrop(Object.freeze({ id: project.id, position: event.clientY < rect.top + rect.height / 2 ? "before" : "after" }));
+  };
+  const dropProject = (project: Project) => (event: DragEvent<HTMLElement>) => {
+    const draggedId = event.dataTransfer.getData("application/x-project-id");
+    if (!draggedId || draggedId === project.id) return;
+    event.preventDefault();
+    const position = event.clientY < event.currentTarget.getBoundingClientRect().top + event.currentTarget.getBoundingClientRect().height / 2 ? "before" : "after";
+    const ordered = activeProjects.filter((item) => item.id !== draggedId);
+    const index = ordered.findIndex((item) => item.id === project.id);
+    const beforeId = position === "before" ? project.id : ordered[index + 1]?.id ?? null;
+    const afterId = position === "before" ? ordered[index - 1]?.id ?? null : project.id;
+    setActiveProjectDrop(null);
+    setDraggingProjectId(null);
+    setActiveDropZone(null);
+    reorderProjectMutation.mutate({ id: draggedId, beforeId, afterId });
+  };
+  const dropTaskOnCalendarDate = (date: string) => (event: DragEvent<HTMLElement>) => {
+    const taskId = event.dataTransfer.getData("text/task-id");
+    if (!taskId) return;
+    event.preventDefault();
+    setActiveCalendarDate(null);
+    setActiveDropZone(null);
+    void api.updateTask(taskId, { dueDate: date }).then(() => queryClient.invalidateQueries({ queryKey: taskQueryKey }));
+  };
+  const markCalendarDate = (date: string) => (event: DragEvent<HTMLElement>) => {
+    if (!event.dataTransfer.types.includes("text/task-id")) return;
+    event.preventDefault();
+    setActiveCalendarDate(date);
   };
 
   const allowDrop = (event: DragEvent<HTMLElement>) => {
@@ -1045,6 +1126,28 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const inboxSections = allSections.filter((section) => section.projectId === null);
   const projectSections = allSections.filter((section) => section.projectId === targetProjectId && targetProjectId !== null);
   const inboxRootTasks = allTasks.filter((task) => task.projectId === null && task.sectionId === null);
+  const currentScopeDescription = targetProjectId === null ? inboxDescriptionQuery.data ?? "" : activeProjects.find((project) => project.id === targetProjectId)?.description ?? "";
+  const startScopeDescriptionEdit = () => { setScopeDescriptionDraft(currentScopeDescription); setEditingScopeDescription(true); };
+  const saveScopeDescription = async () => {
+    const description = scopeDescriptionDraft.trim();
+    if (targetProjectId === null) {
+      await api.updateInboxDescription(description);
+      await queryClient.invalidateQueries({ queryKey: inboxDescriptionQueryKey });
+    } else {
+      updateProjectMutation.mutate({ id: targetProjectId, description });
+    }
+    setEditingScopeDescription(false);
+  };
+  const removeScopeDescription = async () => {
+    if (!confirmDeletion("Delete this description?")) return;
+    if (targetProjectId === null) {
+      await api.updateInboxDescription("");
+      await queryClient.invalidateQueries({ queryKey: inboxDescriptionQueryKey });
+    } else {
+      updateProjectMutation.mutate({ id: targetProjectId, description: "" });
+    }
+  };
+  const scopeDescriptionBlock = editingScopeDescription ? <section className="scope-description-editor" aria-label="Description editor"><h2>Description</h2><AutoGrowTextarea ariaLabel="Scope description" autoFocus value={scopeDescriptionDraft} onChange={setScopeDescriptionDraft} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setEditingScopeDescription(false); } }} /><div><button type="button" className="btn-primary" onClick={() => void saveScopeDescription()}>Save</button><button type="button" onClick={() => setEditingScopeDescription(false)}>Cancel</button></div></section> : currentScopeDescription ? <section className="scope-description" aria-labelledby="scope-description-title"><div><h2 id="scope-description-title">Description</h2><div><button type="button" aria-label="Edit description" onClick={startScopeDescriptionEdit}><Edit3 size={14} aria-hidden="true" />Edit</button><button type="button" aria-label="Delete description" className="danger" onClick={() => void removeScopeDescription()}><Trash2 size={14} aria-hidden="true" />Delete</button></div></div><p>{currentScopeDescription}</p></section> : <button type="button" className="add-description-trigger" onClick={startScopeDescriptionEdit}><Plus size={15} aria-hidden="true" />Add description</button>;
 
   const taskActions = Object.freeze({
     toggleTask: toggleMutation.mutate,
@@ -1199,14 +1302,13 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
                 </button>
               </form>
             ) : (
-              <div key={project.id} className={clsx("project-nav-row", draggingProjectId === project.id && "project-dragging")} draggable onDragStart={(event) => { setDraggingProjectId(project.id); event.dataTransfer.setData("application/x-project-id", project.id); event.dataTransfer.effectAllowed = "move"; }} onDragEnd={() => { setDraggingProjectId(null); setActiveProjectDropId(null); }} onDragOver={(event) => { if (event.dataTransfer.types.includes("application/x-project-id")) { event.preventDefault(); setActiveProjectDropId(project.id); } }} onDragLeave={() => setActiveProjectDropId(null)} onDrop={(event) => { const draggedId = event.dataTransfer.getData("application/x-project-id"); setActiveProjectDropId(null); if (!draggedId || draggedId === project.id) return; event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); const placeBefore = event.clientY < rect.top + rect.height / 2; const index = activeProjects.findIndex((item) => item.id === project.id); const beforeId = placeBefore ? project.id : activeProjects[index + 1]?.id ?? null; const afterId = placeBefore ? activeProjects[index - 1]?.id ?? null : project.id; reorderProjectMutation.mutate({ id: draggedId, beforeId, afterId }); }}>
+              <div key={project.id} className={clsx("project-nav-row", draggingProjectId === project.id && "project-dragging", activeProjectDrop?.id === project.id && `project-drop-${activeProjectDrop.position}`)} draggable onDragStart={(event) => { setActiveDropZone(null); setActiveProjectDrop(null); setDraggingProjectId(project.id); event.dataTransfer.setData("application/x-project-id", project.id); event.dataTransfer.effectAllowed = "move"; }} onDragEnd={() => { setDraggingProjectId(null); setActiveProjectDrop(null); setActiveDropZone(null); }} onDragOver={markProjectDrop(project)} onDragLeave={() => setActiveProjectDrop(null)} onDrop={dropProject(project)}>
                 <button
                   type="button"
                   className={clsx(
                     "nav-button",
                     targetProjectId === project.id && "active",
                     activeDropZone === projectPlacement(project.id) && "drop-active",
-                    activeProjectDropId === project.id && "drop-active"
                   )}
                   onClick={() => {
                     window.history.pushState({}, "", `/?project=${encodeURIComponent(project.id)}`); setCurrentPath("/");
@@ -1287,10 +1389,11 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
           <section className="drop-zone task-filter-page" aria-label={`${viewTitle} tasks`}>
             {pageMode === "dates" ? <div className="date-view-switch" aria-label="Date view"><button type="button" aria-pressed={dateView === "list"} onClick={() => setDateView("list")}>List</button><button type="button" aria-pressed={dateView === "calendar"} onClick={() => setDateView("calendar")}>Calendar</button></div> : null}
             {pageMode === "labels" ? <nav className="label-filter-list" aria-label="Filter by label"><a className={!selectedLabel ? "active" : ""} href="/labels">All labels</a>{Array.from(new Set(flatTasks.flatMap((task) => task.labels))).sort().map((label) => <a key={label} className={selectedLabel === label ? "active" : ""} href={`/labels?label=${encodeURIComponent(label)}`}>{label}</a>)}</nav> : null}
-            {pageMode === "dates" && dateView === "calendar" ? <><div className="calendar-month-control"><button type="button" aria-label="Previous month" onClick={() => setCalendarMonth((month) => { const date = new Date(`${month}-01T00:00:00Z`); date.setUTCMonth(date.getUTCMonth() - 1); return date.toISOString().slice(0, 7); })}>‹</button><label>Month<input aria-label="Calendar month" type="month" value={calendarMonth} onChange={(event) => setCalendarMonth(event.target.value)} /></label><button type="button" aria-label="Next month" onClick={() => setCalendarMonth((month) => { const date = new Date(`${month}-01T00:00:00Z`); date.setUTCMonth(date.getUTCMonth() + 1); return date.toISOString().slice(0, 7); })}>›</button></div><div className="dates-calendar" aria-label="Calendar view">{Array.from({ length: new Date(Number(calendarMonth.slice(0, 4)), Number(calendarMonth.slice(5, 7)), 0).getDate() }, (_, index) => index + 1).map((day) => { const matching = viewTasks.filter((task) => task.dueDate?.startsWith(calendarMonth) && Number(task.dueDate.slice(-2)) === day); return <section key={day} className="dates-calendar-day"><h2>{day}</h2>{matching.map((task) => <button type="button" key={task.id} onClick={() => { const node = findTaskNode(allTasks, task.id); if (node) openDetails(node); }}>{task.title}</button>)}</section>; })}</div></> : viewTasks.length > 0 ? renderTaskNodes(viewTasks, taskActions) : <p className="empty">{pageMode === "dates" ? "No dated tasks yet." : "No tasks with this label."}</p>}
+            {pageMode === "dates" && dateView === "calendar" ? <><div className="calendar-month-control"><button type="button" aria-label="Previous month" onClick={() => setCalendarMonth((month) => { const date = new Date(`${month}-01T00:00:00Z`); date.setUTCMonth(date.getUTCMonth() - 1); return date.toISOString().slice(0, 7); })}>‹</button><label>Month<input aria-label="Calendar month" type="month" value={calendarMonth} onChange={(event) => setCalendarMonth(event.target.value)} /></label><button type="button" aria-label="Next month" onClick={() => setCalendarMonth((month) => { const date = new Date(`${month}-01T00:00:00Z`); date.setUTCMonth(date.getUTCMonth() + 1); return date.toISOString().slice(0, 7); })}>›</button></div><div className="dates-calendar" aria-label="Calendar view">{Array.from({ length: new Date(Number(calendarMonth.slice(0, 4)), Number(calendarMonth.slice(5, 7)), 0).getDate() }, (_, index) => index + 1).map((day) => { const date = `${calendarMonth}-${String(day).padStart(2, "0")}`; const matching = viewTasks.filter((task) => task.dueDate === date); return <section key={day} className={clsx("dates-calendar-day", activeCalendarDate === date && "calendar-drop-active")} aria-label={`Tasks for ${date}`} onDragOver={markCalendarDate(date)} onDragLeave={() => setActiveCalendarDate(null)} onDrop={dropTaskOnCalendarDate(date)}><h2>{day}</h2>{matching.map((task) => <button type="button" key={task.id} draggable onDragStart={(event) => { setDraggingTaskId(task.id); event.dataTransfer.setData("text/task-id", task.id); event.dataTransfer.effectAllowed = "move"; }} onDragEnd={() => { setDraggingTaskId(null); setActiveCalendarDate(null); }} onClick={() => { const node = findTaskNode(allTasks, task.id); if (node) openDetails(node); }}>{task.title}</button>)}</section>; })}</div></> : viewTasks.length > 0 ? renderTaskNodes(viewTasks, taskActions) : <p className="empty">{pageMode === "dates" ? "No dated tasks yet." : "No tasks with this label."}</p>}
           </section>
         ) : targetProjectId === null ? (
           <div className="board">
+            {scopeDescriptionBlock}
             <section
               className={clsx("drop-zone", activeDropZone === "inbox" && "drop-active")}
               onDragEnter={markDropZone(null, null)}
@@ -1321,7 +1424,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
                   onDrop={moveDroppedTask(null, section.id)}
                   aria-label={`Section ${section.title}`}
                 >
-                  <div className="section-header">
+                  <div className={clsx("section-header", draggingSectionId === section.id && "section-dragging", activeSectionDrop?.id === section.id && `section-drop-${activeSectionDrop.position}`)} draggable={editSectionId !== section.id} onDragStart={startSectionDrag(section)} onDragEnd={() => { setDraggingSectionId(null); setActiveSectionDrop(null); }} onDragOver={markSectionDrop(section)} onDragLeave={() => setActiveSectionDrop(null)} onDrop={dropSection(section, inboxSections)}>
                     {editSectionId === section.id ? (
                       <form className="section-edit-form" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setEditSectionId(null); setEditSectionTitle(""); } }} onSubmit={submitSectionEdit(section)}>
                         <label htmlFor={`section-edit-${section.id}`}>Section title</label>
@@ -1371,6 +1474,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
           </div>
         ) : (
           <div className="board">
+            {scopeDescriptionBlock}
             <section
               className={clsx("drop-zone", activeDropZone === projectPlacement(targetProjectId) && "drop-active")}
               onDragEnter={markDropZone(targetProjectId, null)}
@@ -1393,7 +1497,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
             {projectSections.map((section) => {
               const sectionTasks = allTasks.filter((task) => task.projectId === targetProjectId && task.sectionId === section.id);
               return <section key={section.id} className={clsx("drop-zone", activeDropZone === sectionPlacement(section.id) && "drop-active")} onDragEnter={markDropZone(targetProjectId, section.id)} onDragOver={markDropZone(targetProjectId, section.id)} onDragLeave={() => setActiveDropZone(null)} onDrop={moveDroppedTask(targetProjectId, section.id)} aria-label={`Section ${section.title}`}>
-                <div className="section-header">
+                <div className={clsx("section-header", draggingSectionId === section.id && "section-dragging", activeSectionDrop?.id === section.id && `section-drop-${activeSectionDrop.position}`)} draggable={editSectionId !== section.id} onDragStart={startSectionDrag(section)} onDragEnd={() => { setDraggingSectionId(null); setActiveSectionDrop(null); }} onDragOver={markSectionDrop(section)} onDragLeave={() => setActiveSectionDrop(null)} onDrop={dropSection(section, projectSections)}>
                   {editSectionId === section.id ? <form className="section-edit-form" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setEditSectionId(null); setEditSectionTitle(""); } }} onSubmit={submitSectionEdit(section)}>
                     <label htmlFor={`section-edit-${section.id}`}>Section title</label><input id={`section-edit-${section.id}`} autoFocus value={editSectionTitle} onChange={(event) => setEditSectionTitle(event.target.value)} />
                     <button type="submit">Save section</button><button type="button" onClick={() => { setEditSectionId(null); setEditSectionTitle(""); }}>Cancel</button>

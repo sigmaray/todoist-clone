@@ -20,6 +20,8 @@ export type SettingsRepository = Readonly<{
   hasSession: (tokenHash: string, now: Date) => Promise<boolean>;
   deleteSession: (tokenHash: string) => Promise<void>;
   deleteAllSessions: () => Promise<void>;
+  getInboxDescription: () => Promise<string>;
+  saveInboxDescription: (description: string) => Promise<void>;
 }>;
 
 export const defaultSettings: StoredSettings = Object.freeze({
@@ -38,6 +40,7 @@ export const toPublicSettings = (settings: StoredSettings): PublicSettings =>
 
 export const createMemorySettingsRepository = (initial: StoredSettings = defaultSettings): SettingsRepository => {
   let settings = initial;
+  let inboxDescription = "";
   let sessions = Object.freeze([] as ReadonlyArray<Readonly<{ tokenHash: string; expiresAt: Date }>>);
 
   return Object.freeze({
@@ -54,6 +57,8 @@ export const createMemorySettingsRepository = (initial: StoredSettings = default
     },
     deleteAllSessions: async () => {
       sessions = Object.freeze([]);
-    }
+    },
+    getInboxDescription: async () => inboxDescription,
+    saveInboxDescription: async (description) => { inboxDescription = description; }
   });
 };

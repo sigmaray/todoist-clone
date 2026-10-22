@@ -6,6 +6,11 @@ test("task dialog, inline keyboard editing, navigation, search, and calendar wor
   page.on("dialog", (dialog) => dialog.accept());
   await page.goto("/");
 
+  await page.getByRole("button", { name: "Add description" }).click();
+  await page.getByLabel("Scope description").fill("Inbox description from E2E");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText("Inbox description from E2E")).toBeVisible();
+
   const project = unique("Keyboard project");
   await page.getByRole("button", { name: "Add project" }).click();
   await expect(page.getByLabel("Project title")).toBeFocused();
@@ -25,7 +30,13 @@ test("task dialog, inline keyboard editing, navigation, search, and calendar wor
   await addDialog.getByRole("button", { name: /Add date/ }).click();
   const addDateDialog = page.getByRole("dialog", { name: "Add date" });
   await expect(addDateDialog.locator('[role="grid"]')).toBeVisible();
+  const todayCell = addDateDialog.locator('[aria-current="date"]');
+  await expect(todayCell).toBeVisible();
+  await expect.poll(() => todayCell.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe("rgb(255, 240, 237)");
   await addDateDialog.getByLabel("New task date").fill("2026-11-18");
+  const selectedDay = addDateDialog.locator('[aria-pressed="true"]');
+  await expect(selectedDay).toBeVisible();
+  await expect.poll(() => selectedDay.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe("rgb(214, 54, 43)");
   await addDateDialog.getByRole("button", { name: "Set date" }).click();
   await expect(addDialog).toBeVisible();
   await addDialog.getByLabel("New task labels").fill("focus, work");
@@ -50,6 +61,14 @@ test("task dialog, inline keyboard editing, navigation, search, and calendar wor
   await page.getByLabel(`Edit ${taskName}`).press("Enter");
   await expect(page.getByRole("button", { name: savedTaskName, exact: true })).toBeVisible();
 
+  await page.locator(`summary[aria-label="Project menu ${project}"]`).click();
+  await expect(page.getByRole("button", { name: "Duplicate", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: "Duplicate", exact: true })).toHaveCount(0);
+  await page.locator(`summary[aria-label="Project menu ${project}"]`).click();
+  await expect(page.getByRole("button", { name: "Duplicate", exact: true })).toBeVisible();
+  await page.getByRole("heading", { name: project, exact: true }).click();
+  await expect(page.getByRole("button", { name: "Duplicate", exact: true })).toHaveCount(0);
   await page.locator(`summary[aria-label="Project menu ${project}"]`).click();
   await page.getByRole("button", { name: "Edit", exact: true }).click();
   const projectEditor = page.locator('input[id^="project-edit-"]');
@@ -83,6 +102,12 @@ test("task dialog, inline keyboard editing, navigation, search, and calendar wor
   await page.locator('input[id^="section-edit-"]').fill(renamedSection);
   await page.locator('input[id^="section-edit-"]').press("Enter");
   await expect(page.getByRole("heading", { name: renamedSection, exact: true })).toBeVisible();
+  const secondSectionName = unique("Ordered section");
+  await page.getByRole("button", { name: "Add section" }).click();
+  await page.getByLabel("Section title").fill(secondSectionName);
+  await page.getByLabel("Section title").press("Enter");
+  await page.locator(`section[aria-label="Section ${secondSectionName}"] .section-header`).dragTo(page.locator(`section[aria-label="Section ${renamedSection}"] .section-header`), { targetPosition: { x: 12, y: 1 } });
+  await expect.poll(() => page.locator('section[aria-label^="Section "]').evaluateAll((sections, names: Readonly<{ first: string; second: string }>) => sections.findIndex((section) => section.getAttribute("aria-label") === `Section ${names.second}`) < sections.findIndex((section) => section.getAttribute("aria-label") === `Section ${names.first}`), { first: renamedSection, second: secondSectionName })).toBe(true);
 
   await page.keyboard.press("Control+k");
   await page.getByRole("textbox", { name: "Search or type a command" }).fill(renamedProject);
@@ -103,6 +128,13 @@ test("task dialog, inline keyboard editing, navigation, search, and calendar wor
   await expect(page.getByRole("button", { name: savedTaskName, exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Calendar" }).click();
   await expect(page.getByLabel("Calendar view")).toBeVisible();
+  await page.getByLabel("Calendar month").fill("2026-11");
+  const day18 = page.locator('section[aria-label="Tasks for 2026-11-18"]');
+  const day19 = page.locator('section[aria-label="Tasks for 2026-11-19"]');
+  await expect(day18.getByRole("button", { name: savedTaskName, exact: true })).toBeVisible();
+  await day18.getByRole("button", { name: savedTaskName, exact: true }).dragTo(day19);
+  await expect(day19.getByRole("button", { name: savedTaskName, exact: true })).toBeVisible();
+  await expect(day18.getByRole("button", { name: savedTaskName, exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "List" }).click();
   await page.goto("/labels");
   await expect(page.getByRole("button", { name: "Inbox", exact: true })).not.toHaveClass(/active/);
@@ -125,4 +157,23 @@ test("task dialog, inline keyboard editing, navigation, search, and calendar wor
   await quickDialog.getByRole("button", { name: "Add task", exact: true }).click();
   await page.evaluate(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "й", bubbles: true })));
   await expect(page.getByRole("dialog", { name: "Add task" })).toBeVisible();
+});
+
+test("project reorder clears all drag highlight states", async ({ page }) => {
+  await page.goto("/");
+  const first = unique("Drag project first");
+  const second = unique("Drag project second");
+  for (const name of [first, second]) {
+    await page.getByRole("button", { name: "Add project" }).click();
+    await page.getByLabel("Project title").fill(name);
+    await page.getByLabel("Project title").press("Enter");
+    await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
+  }
+
+  const firstRow = page.locator(".project-nav-row").filter({ has: page.getByRole("button", { name: first, exact: true }) });
+  const secondRow = page.locator(".project-nav-row").filter({ has: page.getByRole("button", { name: second, exact: true }) });
+  await firstRow.dragTo(secondRow);
+  await expect.poll(() => page.locator(".project-nav-row.project-dragging, .project-nav-row.project-drop-before, .project-nav-row.project-drop-after, .project-nav-row .nav-button.drop-active").count()).toBe(0);
+  await expect(page.getByRole("button", { name: first, exact: true })).not.toHaveClass(/drop-active/);
+  await expect(page.getByRole("button", { name: second, exact: true })).not.toHaveClass(/drop-active/);
 });

@@ -67,6 +67,14 @@ export const createPostgresSettingsRepository = (databaseUrl: string): SettingsR
     },
     deleteAllSessions: async () => {
       await db.delete(sessions);
+    },
+    getInboxDescription: async () => {
+      await db.insert(appSettings).values({ id: singletonId }).onConflictDoNothing();
+      const rows = await db.select({ description: appSettings.inboxDescription }).from(appSettings).where(eq(appSettings.id, singletonId)).limit(1);
+      return rows[0]?.description ?? "";
+    },
+    saveInboxDescription: async (description) => {
+      await db.insert(appSettings).values({ id: singletonId, inboxDescription: description }).onConflictDoUpdate({ target: appSettings.id, set: { inboxDescription: description } });
     }
   });
 };

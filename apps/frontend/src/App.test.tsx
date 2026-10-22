@@ -14,7 +14,6 @@ const task = (values: Partial<TaskNode> & Pick<TaskNode, "id" | "title">): TaskN
     labels: Object.freeze([]),
     comments: Object.freeze([]),
     completed: false,
-    priority: 4,
     parentId: null,
     projectId: null,
     sectionId: null,
@@ -27,6 +26,7 @@ const task = (values: Partial<TaskNode> & Pick<TaskNode, "id" | "title">): TaskN
 
 const project = (values: Partial<Project> & Pick<Project, "id" | "title">): Project =>
   Object.freeze({
+    description: "",
     archived: false,
     lexicalOrder: "U",
     createdAt: "2026-01-01T00:00:00.000Z",
@@ -63,13 +63,16 @@ const baseApi = (tasks: ReadonlyArray<TaskNode>): ApplicationApi =>
       Object.freeze({
         id: "project",
         title,
+        description: "",
         archived: false,
         lexicalOrder: "U",
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z"
       }),
     reorderProject: async (id) => project({ id, title: "Reordered" }),
-    updateProject: async (id, title) => project({ id, title }),
+    updateProject: async (id, patch) => project({ id, title: patch.title ?? "Project", description: patch.description ?? "" }),
+    getInboxDescription: async () => "",
+    updateInboxDescription: async () => undefined,
     duplicateProject: async (id) => project({ id: `${id}-copy`, title: "Project copy" }),
     archiveProject: async (id, archived) => project({ id, title: "Project", archived }),
     deleteProject: async () => undefined,
@@ -83,6 +86,7 @@ const baseApi = (tasks: ReadonlyArray<TaskNode>): ApplicationApi =>
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z"
       }),
+    reorderSection: async (id, beforeId, afterId) => Object.freeze({ id, title: "Reordered", projectId: null, lexicalOrder: beforeId ?? afterId ?? "U", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }),
     updateSection: async (id, title) =>
       Object.freeze({
         id,
@@ -302,7 +306,7 @@ describe("TaskApp", () => {
   });
 
   it("updates and deletes projects from the sidebar", async () => {
-    const updateProject = vi.fn(async (id: string, title: string): Promise<Project> => project({ id, title }));
+    const updateProject = vi.fn(async (id: string, patch: Readonly<{ title?: string; description?: string }>): Promise<Project> => project({ id, title: patch.title ?? "Roadmap", description: patch.description ?? "" }));
     const deleteProject = vi.fn(async () => undefined);
 
     renderApp(
@@ -328,12 +332,52 @@ describe("TaskApp", () => {
     await userEvent.type(editInput, "Launch plan");
     await userEvent.click(screen.getByRole("button", { name: "Save project" }));
 
-    await waitFor(() => expect(updateProject).toHaveBeenCalledWith("project-1", "Launch plan"));
+    await waitFor(() => expect(updateProject).toHaveBeenCalledWith("project-1", { id: "project-1", title: "Launch plan" }));
 
     await userEvent.click(screen.getByLabelText("Project menu Launch plan"));
     await userEvent.click(await screen.findByRole("button", { name: "Delete" }));
 
     await waitFor(() => expect(deleteProject).toHaveBeenCalledWith("project-1"));
+  });
+
+  it("saves, edits, and removes the Inbox description", async () => {
+    let description = "";
+    renderApp(Object.freeze({
+      ...baseApi(Object.freeze([])),
+      getInboxDescription: async () => description,
+      updateInboxDescription: async (next) => { description = next; }
+    }));
+
+    await userEvent.click(await screen.findByRole("button", { name: "Add description" }));
+    await userEvent.type(screen.getByLabelText("Scope description"), "Inbox notes");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Inbox notes")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Edit description" }));
+    await userEvent.clear(screen.getByLabelText("Scope description"));
+    await userEvent.type(screen.getByLabelText("Scope description"), "Updated notes");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Updated notes")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Delete description" }));
+    expect(await screen.findByRole("button", { name: "Add description" })).toBeInTheDocument();
+  });
+
+  it("closes an open project menu with Escape and outside click", async () => {
+    renderApp(Object.freeze({ ...baseApi(Object.freeze([])), listProjects: async () => Object.freeze([project({ id: "project-1", title: "Roadmap" })]) }));
+    await screen.findByRole("button", { name: "Roadmap" });
+    const menu = screen.getByLabelText("Project menu Roadmap").parentElement;
+    if (menu === null) throw new Error("Missing project menu");
+
+    await userEvent.click(screen.getByLabelText("Project menu Roadmap"));
+    expect(within(menu).getByRole("button", { name: "Duplicate" })).toBeVisible();
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(menu).not.toHaveAttribute("open"));
+
+    await userEvent.click(screen.getByLabelText("Project menu Roadmap"));
+    expect(within(menu).getByRole("button", { name: "Duplicate" })).toBeVisible();
+    await userEvent.click(screen.getByRole("heading", { name: "Inbox", level: 1 }));
+    await waitFor(() => expect(menu).not.toHaveAttribute("open"));
   });
 
   it("creates inbox sections and moves inbox tasks into them", async () => {
@@ -659,14 +703,14 @@ describe("TaskApp", () => {
   });
 
   it("previews markdown for the current task list", async () => {
-    renderApp(baseApi(Object.freeze([task({ id: "1", title: "Plan MVP", completed: true, priority: 1 })])));
+    renderApp(baseApi(Object.freeze([task({ id: "1", title: "Plan MVP", completed: true })])));
 
     await screen.findByText("Plan MVP");
     expect(screen.queryByText("P1")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Preview markdown" }));
 
     expect(await screen.findByRole("dialog", { name: "Markdown preview" })).toBeInTheDocument();
-    expect(screen.getByText(/- \[x\] Plan MVP \(P1\)/)).toBeInTheDocument();
+    expect(screen.getByText(/- \[x\] Plan MVP/)).toBeInTheDocument();
     fireEvent.keyDown(screen.getByRole("dialog", { name: "Markdown preview" }), { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "Markdown preview" })).not.toBeInTheDocument();
   });
@@ -848,7 +892,7 @@ describe("createTaskApi", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    await createTaskApi("http://api.test").updateProject("project-1", "Launch");
+    await createTaskApi("http://api.test").updateProject("project-1", Object.freeze({ title: "Launch" }));
     await createTaskApi("http://api.test").updateTask("task-1", Object.freeze({ title: "Renamed" }));
 
     expect(fetchMock).toHaveBeenCalledWith(

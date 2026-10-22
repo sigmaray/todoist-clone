@@ -12,12 +12,11 @@ describe("POST /tasks", () => {
   it("creates a task", async () => {
     const response = await request(createTestServer())
       .post("/tasks")
-      .send({ title: "Ship MVP", priority: 1 })
+      .send({ title: "Ship MVP" })
       .expect(201);
 
     expect(response.body.task).toMatchObject({
       title: "Ship MVP",
-      priority: 1,
       completed: false,
       parentId: null
     });
@@ -125,11 +124,11 @@ describe("POST /tasks", () => {
       .send({ title: "Subtask", parentId: sectionTaskResponse.body.task.id, sectionId: sectionResponse.body.section.id })
       .expect(201);
 
-    await agent.patch(`/projects/${projectId}`).send({ title: "Roadmap 2" }).expect(200);
+    await agent.patch(`/projects/${projectId}`).send({ title: "Roadmap 2", description: "Project notes" }).expect(200);
 
     const renamed = await agent.get("/projects").expect(200);
 
-    expect(renamed.body.projects[0]).toMatchObject({ id: projectId, title: "Roadmap 2" });
+    expect(renamed.body.projects[0]).toMatchObject({ id: projectId, title: "Roadmap 2", description: "Project notes" });
 
     await agent.delete(`/projects/${projectId}`).expect(200);
 
@@ -204,6 +203,17 @@ describe("PATCH /projects/:id/order", () => {
   });
 });
 
+describe("PATCH /sections/:id/order", () => {
+  it("persists the requested section order within its scope", async () => {
+    const agent = request(createTestServer());
+    const created = await Promise.all(["First", "Second", "Third"].map((title) => agent.post("/sections").send({ title }).expect(201)));
+    const [first, second, third] = created.map((response) => response.body.section);
+    await agent.patch(`/sections/${third.id}/order`).send({ beforeId: first.id, afterId: null }).expect(200);
+    const listed = await agent.get("/sections").expect(200);
+    expect(listed.body.sections.map((section: { id: string }) => section.id)).toEqual([third.id, first.id, second.id]);
+  });
+});
+
 describe("settings and session authentication", () => {
   it("defaults to delete confirmations and allows updating that preference", async () => {
     const settingsRepository = createMemorySettingsRepository();
@@ -215,6 +225,16 @@ describe("settings and session authentication", () => {
     });
     await agent.put("/settings").send({ confirmDelete: false, accessMode: "anonymous", username: null }).expect(200);
     await agent.get("/settings").expect(200).expect(({ body }) => expect(body.settings.confirmDelete).toBe(false));
+  });
+
+  it("persists the Inbox description", async () => {
+    const settingsRepository = createMemorySettingsRepository();
+    const server = createServer(getRequestListener(createApp(createMemoryTaskRepository(), { settingsRepository }).fetch));
+    const agent = request.agent(server);
+
+    await agent.get("/inbox/description").expect(200).expect(({ body }) => expect(body.description).toBe(""));
+    await agent.put("/inbox/description").send({ description: "Inbox notes" }).expect(200);
+    await agent.get("/inbox/description").expect(200).expect(({ body }) => expect(body.description).toBe("Inbox notes"));
   });
 
   it("protects app routes with an HttpOnly session cookie when password access is enabled", async () => {

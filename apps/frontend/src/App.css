@@ -957,10 +957,22 @@ body {
 }
 
 .project-menu { justify-self: end; }
-.project-nav-row { display: flex; align-items: center; }
+.project-nav-row { position: relative; display: flex; align-items: center; }
 .project-nav-row > .nav-button { flex: 1 1 auto; }
 .project-nav-row > .project-menu { flex: 0 0 34px; z-index: 1; }
 .project-nav-row.project-dragging { opacity: .48; transform: translateY(1px) scale(.992); }
+.project-nav-row.project-drop-before::before, .project-nav-row.project-drop-after::before,
+.section-header.section-drop-before::before, .section-header.section-drop-after::before { content: ""; position: absolute; z-index: 5; right: 5px; left: 5px; height: 2px; border-radius: 999px; background: #d33f2f; box-shadow: 0 0 0 3px rgb(211 63 47 / 0.12); pointer-events: none; }
+.project-nav-row.project-drop-before::after, .project-nav-row.project-drop-after::after,
+.section-header.section-drop-before::after, .section-header.section-drop-after::after { content: ""; position: absolute; z-index: 6; left: 0; width: 10px; height: 10px; border: 2px solid #d33f2f; border-radius: 50%; background: #fff; box-shadow: 0 0 0 3px rgb(211 63 47 / 0.12); pointer-events: none; }
+.project-nav-row.project-drop-before::before, .section-header.section-drop-before::before { top: -1px; }
+.project-nav-row.project-drop-before::after, .section-header.section-drop-before::after { top: -5px; }
+.project-nav-row.project-drop-after::before, .section-header.section-drop-after::before { bottom: -1px; }
+.project-nav-row.project-drop-after::after, .section-header.section-drop-after::after { bottom: -5px; }
+.section-header { position: relative; }
+.section-header[draggable="true"] { cursor: grab; }
+.section-header[draggable="true"]:active { cursor: grabbing; }
+.section-header.section-dragging { opacity: .48; transform: translateY(1px) scale(.992); }
 .project-menu summary { position: relative; z-index: 2; }
 
 .project-nav-row > button:not(.nav-button) {
@@ -1141,8 +1153,11 @@ body {
 }
 
 .board {
+  display: flex;
+  flex-direction: column;
   gap: 26px;
 }
+.board > .section-create-block { order: 999; }
 
 .drop-zone {
   display: block;
@@ -1675,6 +1690,7 @@ body {
 .date-picker-grid [role="gridcell"] button { width: 34px; height: 34px; border: 0; border-radius: 50%; background: transparent; }
 .date-picker-grid [role="gridcell"] button:hover { background: #f5efeb; }
 .date-picker-grid [role="gridcell"] button.selected { color: white; background: #cf4937; }
+.date-picker-grid [role="gridcell"] button.today:not(.selected) { border: 1px solid #cf4937; color: #b83225; font-weight: 700; }
 .task-date-picker-actions { display: flex; justify-content: flex-end; gap: 8px; }
 @media (max-width: 700px) { .task-details-modal { width: calc(100vw - 20px); height: calc(100vh - 20px); max-height: calc(100vh - 20px); } .task-details-layout { grid-template-columns: 1fr; overflow-y: auto; } .task-details-main { overflow: visible; padding: 20px; } .task-details-sidebar { overflow: visible; border-top: 1px solid #eee9e5; border-left: 0; padding: 16px 20px; } }
 
@@ -1693,8 +1709,11 @@ body {
 .calendar-month-control input { border: 1px solid #ddd7d1; border-radius: 6px; padding: 5px 8px; font: inherit; }
 .dates-calendar { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; }
 .dates-calendar-day { min-height: 86px; padding: 7px; border: 1px solid #eee9e5; border-radius: 6px; }
+.dates-calendar-day.calendar-drop-active { border-color: #d33f2f; background: #fff4f0; box-shadow: inset 0 0 0 2px rgb(211 63 47 / 0.14); }
 .dates-calendar-day h2 { margin: 0 0 5px; font-size: .85rem; color: #817872; }
 .dates-calendar-day button { display: block; width: 100%; overflow: hidden; border: 0; border-radius: 4px; padding: 3px 5px; background: #fff1ed; color: #9f382c; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.dates-calendar-day button[draggable="true"] { cursor: grab; }
+.dates-calendar-day button[draggable="true"]:active { cursor: grabbing; }
 .sidebar-settings-exports { display: grid; gap: 5px; margin-top: auto; }
 .sidebar-settings-exports a { color: #6d655f; text-decoration: none; }
 @media (max-width: 700px) { .dates-calendar-day { min-height: 64px; padding: 4px; } .dates-calendar-day button { font-size: .72rem; } }
@@ -1732,3 +1751,23 @@ body {
 .task-details-modal .task-date-quick-links button:hover { color: #a62e24; text-decoration: underline; }
 .project-nav-row[draggable="true"] { cursor: grab; }
 .project-nav-row[draggable="true"]:active { cursor: grabbing; }
+.add-description-trigger { display: inline-flex; align-items: center; gap: 7px; justify-self: start; border: 0; border-radius: 6px; padding: 6px 8px; color: #706861; background: transparent; cursor: pointer; }
+.add-description-trigger:hover { color: #b83225; background: #fff3f0; }
+.scope-description, .scope-description-editor { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid #e8e2dd; border-radius: 9px; background: #fbfaf9; }
+.scope-description > div, .scope-description > div > div, .scope-description-editor > div { display: flex; align-items: center; gap: 8px; }
+.scope-description > div { justify-content: space-between; }
+.scope-description h2, .scope-description-editor h2 { margin: 0; color: #5d5650; font-size: 1rem; font-weight: 650; }
+.scope-description p { margin: 0; color: #514b46; white-space: pre-wrap; }
+.scope-description button, .scope-description-editor button { display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 5px; padding: 5px 8px; color: #625a54; background: #f1eeeb; cursor: pointer; }
+.scope-description button.danger { color: #a52b20; }
+.scope-description-editor textarea { width: 100%; box-sizing: border-box; border: 1px solid #d7d0ca; border-radius: 7px; padding: 9px 11px; background: #fff; font: inherit; }
+.scope-description-editor > div { justify-content: flex-end; }
+
+/* Restore the date state colors after the shared dialog button styling. */
+.task-date-picker .date-picker-grid [role="gridcell"] button { box-sizing: border-box; width: 34px; height: 34px; border: 1px solid transparent; border-radius: 50%; padding: 0; color: #302c29; background: transparent; font: inherit; font-weight: 400; }
+.task-details-modal .task-date-picker .date-picker-grid [role="gridcell"] button.today:not(.selected),
+.add-task-dialog .task-date-picker .date-picker-grid [role="gridcell"] button.today:not(.selected) { border-color: #c83a2d; color: #a62e24; background: #fff0ed; font-weight: 700; }
+.task-details-modal .task-date-picker .date-picker-grid [role="gridcell"] button.selected,
+.add-task-dialog .task-date-picker .date-picker-grid [role="gridcell"] button.selected { border-color: #d6362b; color: #fff; background: #d6362b; font-weight: 700; box-shadow: 0 0 0 2px #fff, 0 0 0 4px #d6362b; }
+.task-details-modal .task-date-picker .date-picker-grid [role="gridcell"] button.today.selected,
+.add-task-dialog .task-date-picker .date-picker-grid [role="gridcell"] button.today.selected { box-shadow: 0 0 0 2px #fff, 0 0 0 4px #a62e24; }
