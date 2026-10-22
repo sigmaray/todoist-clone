@@ -530,6 +530,281 @@ const useSidebarScrollPosition = () => {
   return Object.freeze({ ref: sidebarRef, onScroll: rememberScroll });
 };
 
+type AppSidebarProps = Readonly<{
+  api: ApplicationApi | null;
+  selectedProjectId?: ProjectId | null;
+  onInboxSelect?: () => void;
+  onProjectSelect?: (projectId: ProjectId) => void;
+  onTaskSelect?: (task: Task) => void;
+  onAddTask?: () => void;
+  isProjectDropActive?: (projectId: ProjectId | null) => boolean;
+  onInboxDragEnter?: React.DragEventHandler<HTMLElement>;
+  onInboxDragOver?: React.DragEventHandler<HTMLElement>;
+  onInboxDragLeave?: React.DragEventHandler<HTMLElement>;
+  onInboxDrop?: React.DragEventHandler<HTMLElement>;
+  onProjectDragEnter?: (projectId: ProjectId) => React.DragEventHandler<HTMLElement>;
+  onProjectDragOver?: (projectId: ProjectId) => React.DragEventHandler<HTMLElement>;
+  onProjectDragLeave?: (projectId: ProjectId) => React.DragEventHandler<HTMLElement>;
+  onProjectDrop?: (projectId: ProjectId) => React.DragEventHandler<HTMLElement>;
+}>;
+
+const AppSidebar = ({ api, selectedProjectId = null, onInboxSelect, onProjectSelect, onTaskSelect, onAddTask, isProjectDropActive, onInboxDragEnter, onInboxDragOver, onInboxDragLeave, onInboxDrop, onProjectDragEnter, onProjectDragOver, onProjectDragLeave, onProjectDrop }: AppSidebarProps) => {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const sidebarScroll = useSidebarScrollPosition();
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [draggingProjectId, setDraggingProjectId] = useState<ProjectId | null>(null);
+  const [activeProjectDrop, setActiveProjectDrop] = useState<Readonly<{ id: ProjectId; position: "before" | "after" | "inside" }> | null>(null);
+  const [addingProject, setAddingProject] = useState(false);
+  const [newProjectParentId, setNewProjectParentId] = useState<ProjectId | null>(null);
+  const [projectTitle, setProjectTitle] = useState("");
+  const [editProjectId, setEditProjectId] = useState<ProjectId | null>(null);
+  const [editProjectTitle, setEditProjectTitle] = useState("");
+  const [openProjectMenuId, setOpenProjectMenuId] = useState<ProjectId | null>(null);
+  const draggedProjectRef = useRef<ProjectId | null>(null);
+  const mobileProjectDropRef = useRef<Readonly<{ id: ProjectId; position: "before" | "after" | "inside" }> | null>(null);
+  const projectsQuery = useQuery({ queryKey: projectQueryKey, queryFn: api?.listProjects ?? (async () => Object.freeze([])), enabled: api !== null });
+  const tasksQuery = useQuery({ queryKey: taskQueryKey, queryFn: api?.listTasks ?? (async () => Object.freeze([])), enabled: api !== null });
+  const sectionsQuery = useQuery({ queryKey: sectionQueryKey, queryFn: api?.listSections ?? (async () => Object.freeze([])), enabled: api !== null });
+  const settingsQuery = useQuery({ queryKey: settingsQueryKey, queryFn: api?.getSettings ?? (async () => Object.freeze({ confirmDelete: true, accessMode: "anonymous" as const, username: null })), enabled: api !== null });
+  const allProjects = projectsQuery.data ?? Object.freeze([]);
+  const activeProjects = allProjects.filter((project) => !project.archived);
+  const navigationProjects = projectTreeOrder(activeProjects);
+  const allTasks = tasksQuery.data ?? Object.freeze([]);
+  const allSections = sectionsQuery.data ?? Object.freeze([]);
+  const closeSidebar = () => setMobileSidebarOpen(false);
+
+  useEffect(() => { setMobileSidebarOpen(false); }, [location.pathname, location.search]);
+  useEffect(() => {
+    if (openProjectMenuId === null) return;
+    const closeOnOutsidePointer = (event: globalThis.PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest(".project-menu") === null) setOpenProjectMenuId(null);
+    };
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") setOpenProjectMenuId(null); };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [openProjectMenuId]);
+
+  const goToProject = (projectId: ProjectId) => {
+    closeSidebar();
+    onProjectSelect?.(projectId);
+    navigate(`/?project=${encodeURIComponent(projectId)}`);
+  };
+  const commitProjectDrop = async (sourceId: ProjectId, target: Project, position: "before" | "after" | "inside") => {
+    const parentId = position === "inside" ? target.id : target.parentId;
+    if (sourceId === target.id || isProjectWithinTree(activeProjects, parentId, sourceId) || api === null) return;
+    try {
+      if (position === "inside") await api.moveProject(sourceId, target.id);
+      else {
+        const siblings = activeProjects.filter((item) => item.parentId === target.parentId && item.id !== sourceId);
+        const index = siblings.findIndex((item) => item.id === target.id);
+        const beforeId = position === "before" ? target.id : siblings[index + 1]?.id ?? null;
+        const afterId = position === "before" ? siblings[index - 1]?.id ?? null : target.id;
+        await api.moveProject(sourceId, target.parentId);
+        await api.reorderProject(sourceId, beforeId, afterId);
+      }
+      await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+    } catch {
+      await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+    }
+  };
+  const positionFor = (row: HTMLElement, clientY: number) => {
+    const rect = row.getBoundingClientRect();
+    const ratio = rect.height > 0 ? (clientY - rect.top) / rect.height : 0.5;
+    return ratio < 0.2 ? "before" as const : ratio > 0.8 ? "after" as const : "inside" as const;
+  };
+  const beginProjectDrag = (project: Project) => (event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    draggedProjectRef.current = project.id;
+    mobileProjectDropRef.current = null;
+    setDraggingProjectId(project.id);
+    setActiveProjectDrop(null);
+  };
+  const moveProjectDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const sourceId = draggedProjectRef.current;
+    if (sourceId === null) return;
+    event.preventDefault();
+    const element = document.elementFromPoint(event.clientX, event.clientY);
+    const row = element instanceof Element ? element.closest<HTMLElement>(".project-nav-row[data-project-id]") : null;
+    const target = activeProjects.find((project) => project.id === row?.dataset.projectId);
+    if (row === null || target === undefined) {
+      mobileProjectDropRef.current = null;
+      setActiveProjectDrop(null);
+      return;
+    }
+    const position = positionFor(row, event.clientY);
+    const parentId = position === "inside" ? target.id : target.parentId;
+    const drop = target.id === sourceId || isProjectWithinTree(activeProjects, parentId, sourceId)
+      ? null
+      : Object.freeze({ id: target.id, position });
+    mobileProjectDropRef.current = drop;
+    setActiveProjectDrop(drop);
+  };
+  const finishProjectDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const sourceId = draggedProjectRef.current;
+    const rememberedDrop = mobileProjectDropRef.current;
+    const element = document.elementFromPoint(event.clientX, event.clientY);
+    const row = element instanceof Element ? element.closest<HTMLElement>(".project-nav-row[data-project-id]") : null;
+    const target = activeProjects.find((project) => project.id === (rememberedDrop?.id ?? row?.dataset.projectId));
+    const position = rememberedDrop?.position ?? (row === null ? null : positionFor(row, event.clientY));
+    draggedProjectRef.current = null;
+    mobileProjectDropRef.current = null;
+    setDraggingProjectId(null);
+    setActiveProjectDrop(null);
+    if (sourceId !== null && target !== undefined && position !== null) void commitProjectDrop(sourceId, target, position);
+  };
+  const cancelProjectDrag = () => {
+    draggedProjectRef.current = null;
+    mobileProjectDropRef.current = null;
+    setDraggingProjectId(null);
+    setActiveProjectDrop(null);
+  };
+  const markProjectDrop = (target: Project) => (event: DragEvent<HTMLElement>) => {
+    const sourceId = event.dataTransfer.getData("application/x-project-id") || draggedProjectRef.current;
+    if (sourceId === null || sourceId === target.id) return;
+    const position = positionFor(event.currentTarget, event.clientY);
+    const parentId = position === "inside" ? target.id : target.parentId;
+    if (isProjectWithinTree(activeProjects, parentId, sourceId)) {
+      setActiveProjectDrop(null);
+      return;
+    }
+    event.preventDefault();
+    setActiveProjectDrop(Object.freeze({ id: target.id, position }));
+  };
+  const dropProject = (target: Project) => (event: DragEvent<HTMLElement>) => {
+    const sourceId = event.dataTransfer.getData("application/x-project-id") || draggedProjectRef.current;
+    if (sourceId === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const position = positionFor(event.currentTarget, event.clientY);
+    setDraggingProjectId(null);
+    setActiveProjectDrop(null);
+    draggedProjectRef.current = null;
+    void commitProjectDrop(sourceId, target, position);
+  };
+  const createProject = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const title = projectTitle.trim();
+    if (api === null || title.length === 0) return;
+    const created = await api.createProject(title, newProjectParentId);
+    queryClient.setQueryData(projectQueryKey, (current: ReadonlyArray<Project> | undefined) => appendById(current, created));
+    setProjectTitle("");
+    setAddingProject(false);
+    setNewProjectParentId(null);
+    goToProject(created.id);
+  };
+  const editProject = async (project: Project, event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const title = editProjectTitle.trim();
+    if (api === null || title.length === 0) return;
+    const updated = await api.updateProject(project.id, { id: project.id, title });
+    queryClient.setQueryData(projectQueryKey, (current: ReadonlyArray<Project> | undefined) => replaceById(current, updated));
+    setEditProjectId(null);
+    setEditProjectTitle("");
+  };
+  const duplicateProject = async (project: Project) => {
+    if (api === null) return;
+    const duplicate = await api.duplicateProject(project.id);
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: projectQueryKey }),
+      queryClient.invalidateQueries({ queryKey: sectionQueryKey }),
+      queryClient.invalidateQueries({ queryKey: taskQueryKey })
+    ]);
+    goToProject(duplicate.id);
+  };
+  const archiveProject = async (project: Project) => {
+    if (api === null) return;
+    const archived = await api.archiveProject(project.id, true);
+    queryClient.setQueryData(projectQueryKey, (current: ReadonlyArray<Project> | undefined) => replaceById(current, archived));
+    if (selectedProjectId === project.id) onInboxSelect?.();
+  };
+  const deleteProject = async (project: Project) => {
+    if (api === null) return;
+    if (settingsQuery.data?.confirmDelete !== false && !window.confirm(`Delete project “${project.title}” and all its tasks?`)) return;
+    await api.deleteProject(project.id);
+    queryClient.setQueryData(projectQueryKey, (current: ReadonlyArray<Project> | undefined) => removeById(current, project.id));
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: sectionQueryKey }),
+      queryClient.invalidateQueries({ queryKey: taskQueryKey })
+    ]);
+    if (selectedProjectId === project.id) onInboxSelect?.();
+  };
+  const activePage = location.pathname === "/tools" ? "tools"
+    : location.pathname === "/settings" ? "settings"
+      : location.pathname === "/archived-projects" ? "archived-projects"
+        : location.pathname === "/dates" ? "dates"
+          : location.pathname === "/labels" ? "labels"
+            : location.pathname === "/export" ? "export"
+              : location.pathname === "/" ? "tasks" : "";
+  const handleTaskSelect = (task: Task) => {
+    closeSidebar();
+    if (onTaskSelect !== undefined) onTaskSelect(task);
+    else navigate(`/?task=${encodeURIComponent(task.id)}`);
+  };
+  const navLink = (href: string, label: string, icon: ReactElement, page: string) => (
+    <Link className={clsx("nav-button nav-link-button", activePage === page && "active")} to={href} onClick={closeSidebar}>{icon}{label}</Link>
+  );
+
+  return <>
+    <button type="button" className="mobile-menu-toggle" aria-label="Open navigation" aria-expanded={mobileSidebarOpen} onClick={() => setMobileSidebarOpen(true)}><Menu size={23} aria-hidden="true" /></button>
+    {mobileSidebarOpen ? <button type="button" className="mobile-sidebar-backdrop" aria-label="Close navigation" onClick={closeSidebar} /> : null}
+    <aside className={clsx("sidebar card shadow-sm", mobileSidebarOpen && "mobile-sidebar-open")} aria-label="Navigation" ref={sidebarScroll.ref} onScroll={sidebarScroll.onScroll}>
+      <button type="button" className="mobile-sidebar-close" aria-label="Close navigation" onClick={closeSidebar}><X size={21} aria-hidden="true" /></button>
+      <div className="sidebar-brand"><span className="brand-mark">T</span><strong>Todoist Clone</strong></div>
+      <SearchPalette tasks={flattenTaskNodes(allTasks)} projects={allProjects} sections={allSections} onTaskSelect={handleTaskSelect} />
+      {onAddTask !== undefined
+        ? <button type="button" className="nav-button add-task-nav-button" onClick={() => { closeSidebar(); onAddTask(); }}><Plus size={17} aria-hidden="true" />Add task <kbd>Q</kbd></button>
+        : <Link className="nav-button add-task-nav-button" to="/?addTask=1" onClick={closeSidebar}><Plus size={17} aria-hidden="true" />Add task <kbd>Q</kbd></Link>}
+      <Link className={clsx("nav-button", activePage === "tasks" && selectedProjectId === null && "active", isProjectDropActive?.(null) && "drop-active")} to="/" onClick={() => { closeSidebar(); onInboxSelect?.(); }} onDragEnter={onInboxDragEnter} onDragOver={onInboxDragOver} onDragLeave={onInboxDragLeave} onDrop={onInboxDrop}><Inbox size={16} aria-hidden="true" />Inbox</Link>
+      {navLink("/dates", "Dates", <CalendarDays size={16} aria-hidden="true" />, "dates")}
+      {navLink("/labels", "Labels", <Tag size={16} aria-hidden="true" />, "labels")}
+      {navLink("/export", "Export", <Download size={16} aria-hidden="true" />, "export")}
+      {toolsEnabled ? navLink("/tools", "Tools", <Code2 size={16} aria-hidden="true" />, "tools") : null}
+      {navLink("/settings", "Settings", <Settings size={16} aria-hidden="true" />, "settings")}
+      {navLink("/archived-projects", "Archived projects", <Archive size={16} aria-hidden="true" />, "archived-projects")}
+      <div className="sidebar-group">
+        <h2>My Projects</h2>
+        {navigationProjects.map((project) => editProjectId === project.id ? (
+          <form key={project.id} className="project-edit-form" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setEditProjectId(null); setEditProjectTitle(""); } }} onSubmit={(event) => void editProject(project, event)}>
+            <label htmlFor={`project-edit-${project.id}`}>Project title</label>
+            <input id={`project-edit-${project.id}`} autoFocus value={editProjectTitle} onChange={(event) => setEditProjectTitle(event.target.value)} />
+            <button type="submit">Save project</button><button type="button" onClick={() => { setEditProjectId(null); setEditProjectTitle(""); }}>Cancel</button>
+          </form>
+        ) : (
+          <div key={project.id} data-project-id={project.id} data-mobile-drop-project={project.id} style={{ paddingInlineStart: `${Math.min(projectDepth(activeProjects, project), 8) * 18}px` }} className={clsx("project-nav-row", draggingProjectId === project.id && "project-dragging", activeProjectDrop?.id === project.id && `project-drop-${activeProjectDrop.position}`)} draggable onDragStart={(event) => { draggedProjectRef.current = project.id; setDraggingProjectId(project.id); setActiveProjectDrop(null); event.dataTransfer.setData("application/x-project-id", project.id); event.dataTransfer.effectAllowed = "move"; }} onDragEnd={cancelProjectDrag} onDragOver={markProjectDrop(project)} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setActiveProjectDrop(null); }} onDrop={dropProject(project)}>
+            <button type="button" className="mobile-project-drag-handle" aria-label={`Drag project ${project.title}`} onPointerDown={beginProjectDrag(project)} onPointerMove={moveProjectDrag} onPointerUp={finishProjectDrag} onPointerCancel={cancelProjectDrag}><GripVertical size={16} aria-hidden="true" /></button>
+            <button type="button" className={clsx("nav-button", activePage === "tasks" && selectedProjectId === project.id && "active", isProjectDropActive?.(project.id) && "drop-active")} title={project.title} onClick={() => goToProject(project.id)} onDragEnter={onProjectDragEnter?.(project.id)} onDragOver={onProjectDragOver?.(project.id)} onDragLeave={onProjectDragLeave?.(project.id)} onDrop={onProjectDrop?.(project.id)}>{project.title}</button>
+            <details className="project-menu" open={openProjectMenuId === project.id}>
+              <summary aria-label={`Project menu ${project.title}`} onClick={(event) => { event.preventDefault(); setOpenProjectMenuId((current) => current === project.id ? null : project.id); }}><MoreHorizontal size={17} aria-hidden="true" /></summary>
+              <div className="project-menu-items">
+                <button type="button" onClick={() => { setOpenProjectMenuId(null); setNewProjectParentId(project.id); setProjectTitle(""); setAddingProject(true); }}>＋ Add subproject</button>
+                <button type="button" onClick={() => { setOpenProjectMenuId(null); setEditProjectId(project.id); setEditProjectTitle(project.title); }}><Edit3 size={14} aria-hidden="true" /> Edit</button>
+                <button type="button" onClick={() => { setOpenProjectMenuId(null); void duplicateProject(project); }}><Copy size={14} aria-hidden="true" /> Duplicate</button>
+                <button type="button" onClick={() => { setOpenProjectMenuId(null); void archiveProject(project); }}><Archive size={14} aria-hidden="true" /> Archive</button>
+                <button type="button" className="danger" onClick={() => { setOpenProjectMenuId(null); void deleteProject(project); }}><Trash2 size={14} aria-hidden="true" /> Delete</button>
+              </div>
+            </details>
+          </div>
+        ))}
+      </div>
+      {api !== null ? <div className="sidebar-create-block">
+        {addingProject ? <form className="inline-create-form" onSubmit={(event) => void createProject(event)} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setAddingProject(false); setProjectTitle(""); setNewProjectParentId(null); } }}>
+          {newProjectParentId !== null ? <p>Subproject of {activeProjects.find((project) => project.id === newProjectParentId)?.title}</p> : null}
+          <label htmlFor="project-title">Title</label><input id="project-title" aria-label="Project title" value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} />
+          <div><button type="submit" className="btn-primary">Save</button><button type="button" onClick={() => { setAddingProject(false); setProjectTitle(""); setNewProjectParentId(null); }}>Cancel</button></div>
+        </form> : <button type="button" className="add-project-trigger" onClick={() => { setNewProjectParentId(null); setProjectTitle(""); setAddingProject(true); }}><Plus size={16} aria-hidden="true" />Add project</button>}
+      </div> : null}
+    </aside>
+  </>;
+};
+
 export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -1465,116 +1740,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   return (
     <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={finishDndDrag}>
     <main className="shell app-layout">
-      <button type="button" className="mobile-menu-toggle" aria-label="Open navigation" aria-expanded={mobileSidebarOpen} onClick={() => setMobileSidebarOpen(true)}><Menu size={23} aria-hidden="true" /></button>
-      {mobileSidebarOpen ? <button type="button" className="mobile-sidebar-backdrop" aria-label="Close navigation" onClick={() => setMobileSidebarOpen(false)} /> : null}
-      <aside className={clsx("sidebar card shadow-sm", mobileSidebarOpen && "mobile-sidebar-open")} aria-label="Navigation" ref={sidebarScroll.ref} onScroll={sidebarScroll.onScroll}>
-        <button type="button" className="mobile-sidebar-close" aria-label="Close navigation" onClick={() => setMobileSidebarOpen(false)}><X size={21} aria-hidden="true" /></button>
-        <div className="sidebar-brand">
-          <span className="brand-mark">T</span>
-          <strong>Todoist Clone</strong>
-        </div>
-        <SearchPalette tasks={flatTasks} projects={allProjects} sections={allSections} onTaskSelect={(task) => { const node = findTaskNode(allTasks, task.id); if (node !== null) openDetails(node); }} />
-        <button type="button" className="nav-button add-task-nav-button" onClick={() => openAddTaskDialog(pageMode === "tasks" ? (targetSectionId === null ? targetProjectId === null ? inboxPlacement : projectPlacement(targetProjectId) : sectionPlacement(targetSectionId)) : inboxPlacement)}><Plus size={17} aria-hidden="true" />Add task <kbd>Q</kbd></button>
-        <button
-          type="button"
-          data-mobile-drop-project="inbox"
-          className={["nav-button", pageMode === "tasks" && targetProjectId === null && targetSectionId === null ? "active" : ""].filter(Boolean).join(" ")}
-          onClick={() => {
-            navigate("/");
-            setMobileSidebarOpen(false);
-            setTargetProjectId(null);
-            setTargetSectionId(null);
-          }}
-          onDragEnter={markDropZone(null, null)}
-          onDragOver={markDropZone(null, null)}
-          onDragLeave={() => setActiveDropZone(null)}
-          onDrop={moveDroppedTask(null, null)}
-        >
-          <Inbox size={16} aria-hidden="true" />
-          Inbox
-        </button>
-        <Link className={clsx("nav-button nav-link-button", pageMode === "dates" && "active")} to="/dates"><CalendarDays size={16} aria-hidden="true" />Dates</Link>
-        <Link className={clsx("nav-button nav-link-button", pageMode === "labels" && "active")} to="/labels"><Tag size={16} aria-hidden="true" />Labels</Link>
-        <Link className={clsx("nav-button nav-link-button", pageMode === "export" && "active")} to="/export"><Download size={16} aria-hidden="true" />Export</Link>
-        {toolsEnabled ? (
-          <Link className="nav-button nav-link-button" to="/tools">
-            <Code2 size={16} aria-hidden="true" />
-            Tools
-          </Link>
-        ) : null}
-        <Link className="nav-button nav-link-button" to="/settings">
-          <Settings size={16} aria-hidden="true" />
-          Settings
-        </Link>
-        <Link className="nav-button nav-link-button" to="/archived-projects"><Archive size={16} aria-hidden="true" /> Archived projects</Link>
-        <div className="sidebar-group">
-          <h2>My Projects</h2>
-          {navigationProjects.map((project) =>
-            editProjectId === project.id ? (
-              <form key={project.id} className="project-edit-form" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setEditProjectId(null); setEditProjectTitle(""); } }} onSubmit={submitProjectEdit(project)}>
-                <label htmlFor={`project-edit-${project.id}`}>Project title</label>
-                <input
-                  id={`project-edit-${project.id}`}
-                  autoFocus
-                  value={editProjectTitle}
-                  onChange={(event) => setEditProjectTitle(event.target.value)}
-                />
-                <button type="submit">Save project</button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditProjectId(null);
-                    setEditProjectTitle("");
-                  }}
-                >
-                  Cancel
-                </button>
-              </form>
-            ) : (
-              <div key={project.id} data-project-id={project.id} style={{ paddingInlineStart: `${Math.min(projectDepth(activeProjects, project), 8) * 18}px` }} data-mobile-drop-project={project.id} className={clsx("project-nav-row", draggingProjectId === project.id && "project-dragging", activeProjectDrop?.id === project.id && `project-drop-${activeProjectDrop.position}`)} draggable onDragStart={(event) => { setActiveDropZone(null); setActiveProjectDrop(null); setDraggingProjectId(project.id); event.dataTransfer.setData("application/x-project-id", project.id); event.dataTransfer.effectAllowed = "move"; }} onDragEnd={() => { setDraggingProjectId(null); setActiveProjectDrop(null); setActiveDropZone(null); }} onDragOver={markProjectDrop(project)} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setActiveProjectDrop(null); }} onDrop={dropProject(project)}>
-                <button type="button" className="mobile-project-drag-handle" aria-label={`Drag project ${project.title}`} onPointerDown={startMobileProjectDrag(project)} onPointerMove={moveMobileDrag} onPointerUp={finishMobileDrag} onPointerCancel={cancelMobileDrag}><GripVertical size={16} aria-hidden="true" /></button>
-                <button
-                  type="button"
-                  className={clsx(
-                    "nav-button",
-                    targetProjectId === project.id && "active",
-                    activeDropZone === projectPlacement(project.id) && "drop-active",
-                  )}
-                  onClick={() => {
-                    navigate(`/?project=${encodeURIComponent(project.id)}`);
-                    setMobileSidebarOpen(false);
-                    setTargetProjectId(project.id);
-                    setTargetSectionId(null);
-                  }}
-                  onDragEnter={markDropZone(project.id, null)}
-                  onDragOver={markDropZone(project.id, null)}
-                  onDragLeave={() => setActiveDropZone(null)}
-                  onDrop={moveDroppedTask(project.id, null)}
-                >
-                  {project.title}
-                </button>
-                <details className="project-menu" open={openProjectMenuId === project.id}>
-                  <summary aria-label={`Project menu ${project.title}`} onClick={(event) => { event.preventDefault(); setOpenProjectMenuId((current) => current === project.id ? null : project.id); }}><MoreHorizontal size={17} aria-hidden="true" /></summary>
-                  <div className="project-menu-items">
-                    <button type="button" onClick={() => { setOpenProjectMenuId(null); setNewProjectParentId(project.id); setProjectTitle(""); setAddingProject(true); }}>＋ Add subproject</button>
-                    <button type="button" onClick={() => { setOpenProjectMenuId(null); startProjectEdit(project); }}><Edit3 size={14} aria-hidden="true" /> Edit</button>
-                    <button type="button" onClick={() => { setOpenProjectMenuId(null); duplicateProjectMutation.mutate(project.id); }}><Copy size={14} aria-hidden="true" /> Duplicate</button>
-                    <button type="button" onClick={() => { setOpenProjectMenuId(null); archiveProjectMutation.mutate({ id: project.id, archived: true }); if (targetProjectId === project.id) { setTargetProjectId(null); setTargetSectionId(null); } }}><Archive size={14} aria-hidden="true" /> Archive</button>
-                    <button type="button" className="danger" onClick={() => { setOpenProjectMenuId(null); requestProjectDelete(project); }}><Trash2 size={14} aria-hidden="true" /> Delete</button>
-                  </div>
-                </details>
-              </div>
-            )
-          )}
-        </div>
-        <div className="sidebar-create-block">
-          {addingProject ? <form className="inline-create-form" onSubmit={submitProject} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); cancelProjectCreate(); } }}>
-            {newProjectParentId !== null ? <p>Subproject of {activeProjects.find((project) => project.id === newProjectParentId)?.title}</p> : null}
-            <label htmlFor="project-title">Title</label><input ref={projectCreateInputRef} id="project-title" aria-label="Project title" value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} />
-            <div><button type="submit" className="btn-primary">Save</button><button type="button" onClick={cancelProjectCreate}>Cancel</button></div>
-          </form> : <button type="button" className="add-project-trigger" onClick={() => { setNewProjectParentId(null); setProjectTitle(""); setAddingProject(true); }}><Plus size={16} aria-hidden="true" />Add project</button>}
-        </div>
-      </aside>
+      <AppSidebar api={api} selectedProjectId={targetProjectId} onInboxSelect={() => { setTargetProjectId(null); setTargetSectionId(null); }} onProjectSelect={(id) => { setTargetProjectId(id); setTargetSectionId(null); }} onTaskSelect={(task) => { const node = findTaskNode(allTasks, task.id); if (node !== null) openDetails(node); }} onAddTask={() => openAddTaskDialog(pageMode === "tasks" ? (targetSectionId === null ? targetProjectId === null ? inboxPlacement : projectPlacement(targetProjectId) : sectionPlacement(targetSectionId)) : inboxPlacement)} isProjectDropActive={(id) => activeDropZone === (id === null ? inboxPlacement : projectPlacement(id))} onInboxDragEnter={markDropZone(null, null)} onInboxDragOver={markDropZone(null, null)} onInboxDragLeave={() => setActiveDropZone(null)} onInboxDrop={moveDroppedTask(null, null)} onProjectDragEnter={(id) => markDropZone(id, null)} onProjectDragOver={(id) => markDropZone(id, null)} onProjectDragLeave={() => setActiveDropZone(null)} onProjectDrop={(id) => moveDroppedTask(id, null)} />
 
       <section className="workspace card shadow-sm" aria-label="Task manager">
         <header className="header">
@@ -1902,19 +2068,8 @@ export const ToolsPage = ({ api, navigationApi }: Readonly<{ api: ToolsApi; navi
   if (!toolsEnabled) {
     return (
       <main className="shell app-layout">
-        <button type="button" className="mobile-menu-toggle" aria-label="Open navigation" aria-expanded={mobileSidebarOpen} onClick={() => setMobileSidebarOpen(true)}><Menu size={23} aria-hidden="true" /></button>
-        {mobileSidebarOpen ? <button type="button" className="mobile-sidebar-backdrop" aria-label="Close navigation" onClick={() => setMobileSidebarOpen(false)} /> : null}
-        <aside className={clsx("sidebar card shadow-sm", mobileSidebarOpen && "mobile-sidebar-open")} aria-label="Navigation" ref={sidebarScroll.ref} onScroll={sidebarScroll.onScroll}><button type="button" className="mobile-sidebar-close" aria-label="Close navigation" onClick={() => setMobileSidebarOpen(false)}><X size={21} aria-hidden="true" /></button>
-          <div className="sidebar-brand">
-            <span className="brand-mark">T</span>
-            <strong>Todoist Clone</strong>
-          </div>
-          <Link className="nav-button nav-link-button" to="/">
-            <Inbox size={16} aria-hidden="true" />
-            Inbox
-          </Link>
-        </aside>
-        <section className="workspace card shadow-sm" aria-label="Developer tools disabled">
+        <AppSidebar api={navigationApi ?? null} />
+      <section className="workspace card shadow-sm" aria-label="Developer tools disabled">
           <h1>Not found</h1>
         </section>
       </main>
@@ -1926,34 +2081,7 @@ export const ToolsPage = ({ api, navigationApi }: Readonly<{ api: ToolsApi; navi
 
   return (
     <main className="shell app-layout">
-      <button type="button" className="mobile-menu-toggle" aria-label="Open navigation" aria-expanded={mobileSidebarOpen} onClick={() => setMobileSidebarOpen(true)}><Menu size={23} aria-hidden="true" /></button>
-      {mobileSidebarOpen ? <button type="button" className="mobile-sidebar-backdrop" aria-label="Close navigation" onClick={() => setMobileSidebarOpen(false)} /> : null}
-      <aside className={clsx("sidebar card shadow-sm", mobileSidebarOpen && "mobile-sidebar-open")} aria-label="Navigation" ref={sidebarScroll.ref} onScroll={sidebarScroll.onScroll}><button type="button" className="mobile-sidebar-close" aria-label="Close navigation" onClick={() => setMobileSidebarOpen(false)}><X size={21} aria-hidden="true" /></button>
-        <div className="sidebar-brand">
-          <span className="brand-mark">T</span>
-          <strong>Todoist Clone</strong>
-        </div>
-        <SearchPalette tasks={flattenTaskNodes(taskTree.data ?? Object.freeze([]))} projects={projects.data ?? Object.freeze([])} sections={navigationSections.data ?? Object.freeze([])} onTaskSelect={(task) => { navigate(`/?task=${encodeURIComponent(task.id)}`); }} />
-        <Link className="nav-button add-task-nav-button" to="/?addTask=1"><Plus size={17} aria-hidden="true" />Add task <kbd>Q</kbd></Link>
-        <Link className="nav-button nav-link-button" to="/">
-          <Inbox size={16} aria-hidden="true" />
-          Inbox
-        </Link>
-        <Link className="nav-button nav-link-button" to="/dates"><CalendarDays size={16} aria-hidden="true" />Dates</Link>
-        <Link className="nav-button nav-link-button" to="/labels"><Tag size={16} aria-hidden="true" />Labels</Link>
-        <Link className="nav-button nav-link-button" to="/export"><Download size={16} aria-hidden="true" />Export</Link>
-        <Link className="nav-button nav-link-button active" to="/tools">
-          <Code2 size={16} aria-hidden="true" />
-          Tools
-        </Link>
-        <Link className="nav-button nav-link-button" to="/settings">
-          <Settings size={16} aria-hidden="true" />
-          Settings
-        </Link>
-        <Link className="nav-button nav-link-button" to="/archived-projects"><Archive size={16} aria-hidden="true" /> Archived projects</Link>
-        <div className="sidebar-group"><h2>My Projects</h2>{(projects.data ?? []).filter((project) => !project.archived).map((project) => <Link className="nav-button nav-link-button project-tool-link" key={project.id} title={project.title} to={`/?project=${encodeURIComponent(project.id)}`}><span>{project.title}</span></Link>)}</div>
-        {navigationApi ? <div className="card bg-light border p-3 sidebar-create-block"><form className="compact-form m-0" onSubmit={async (event) => { event.preventDefault(); const nextTitle = projectTitle.trim(); if (!nextTitle) return; await navigationApi.createProject(nextTitle); setProjectTitle(""); await queryClient.invalidateQueries({ queryKey: projectQueryKey }); }}><label htmlFor="tools-project-title">Project title</label><input id="tools-project-title" value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} /><button type="submit"><Plus size={16} aria-hidden="true" />Add project</button></form></div> : null}
-      </aside>
+      <AppSidebar api={navigationApi ?? null} />
       <section className="workspace card shadow-sm tools-panel" aria-label="Database tools">
         <header className="header">
           <div><p className="eyebrow">Development tools</p><h1>Database Tools</h1><p className="tools-description">Browse table data, run SQL, and maintain the local database.</p></div>
@@ -2058,25 +2186,7 @@ export const SettingsPage = ({ api }: Readonly<{ api: ApplicationApi }>) => {
 
   return (
     <main className="shell app-layout">
-      <button type="button" className="mobile-menu-toggle" aria-label="Open navigation" aria-expanded={mobileSidebarOpen} onClick={() => setMobileSidebarOpen(true)}><Menu size={23} aria-hidden="true" /></button>
-      {mobileSidebarOpen ? <button type="button" className="mobile-sidebar-backdrop" aria-label="Close navigation" onClick={() => setMobileSidebarOpen(false)} /> : null}
-      <aside className={clsx("sidebar card shadow-sm", mobileSidebarOpen && "mobile-sidebar-open")} aria-label="Navigation" ref={sidebarScroll.ref} onScroll={sidebarScroll.onScroll}><button type="button" className="mobile-sidebar-close" aria-label="Close navigation" onClick={() => setMobileSidebarOpen(false)}><X size={21} aria-hidden="true" /></button>
-        <div className="sidebar-brand">
-          <span className="brand-mark">T</span>
-          <strong>Todoist Clone</strong>
-        </div>
-        <SearchPalette tasks={flattenTaskNodes(tasks.data ?? Object.freeze([]))} projects={projects.data ?? Object.freeze([])} sections={sections.data ?? Object.freeze([])} onTaskSelect={(task) => { navigate(`/?task=${encodeURIComponent(task.id)}`); }} />
-        <Link className="nav-button add-task-nav-button" to="/?addTask=1"><Plus size={17} aria-hidden="true" />Add task <kbd>Q</kbd></Link>
-        <Link className="nav-button nav-link-button" to="/"><Inbox size={16} aria-hidden="true" />Inbox</Link>
-        <Link className="nav-button nav-link-button" to="/dates"><CalendarDays size={16} aria-hidden="true" />Dates</Link>
-        <Link className="nav-button nav-link-button" to="/labels"><Tag size={16} aria-hidden="true" />Labels</Link>
-        <Link className="nav-button nav-link-button" to="/export"><Download size={16} aria-hidden="true" />Export</Link>
-        {toolsEnabled ? <Link className="nav-button nav-link-button" to="/tools"><Code2 size={16} aria-hidden="true" />Tools</Link> : null}
-        <Link className="nav-button nav-link-button active" to="/settings"><Settings size={16} aria-hidden="true" />Settings</Link>
-        <Link className="nav-button nav-link-button" to="/archived-projects"><Archive size={16} aria-hidden="true" />Archived projects</Link>
-        <div className="sidebar-group"><h2>My Projects</h2>{(projects.data ?? []).filter((project) => !project.archived).map((project) => <Link className="nav-button nav-link-button project-tool-link" key={project.id} to={`/?project=${encodeURIComponent(project.id)}`}><span>{project.title}</span></Link>)}</div>
-        <div className="card bg-light border p-3 sidebar-create-block"><form className="compact-form m-0" onSubmit={async (event) => { event.preventDefault(); const value = navigationProjectTitle.trim(); if (!value) return; await api.createProject(value); setNavigationProjectTitle(""); await queryClient.invalidateQueries({ queryKey: projectQueryKey }); }}><label htmlFor="settings-project-title">Project title</label><input id="settings-project-title" value={navigationProjectTitle} onChange={(event) => setNavigationProjectTitle(event.target.value)} /><button type="submit"><Plus size={16} aria-hidden="true" />Add project</button></form></div>
-      </aside>
+      <AppSidebar api={api} />
       <section className="workspace card shadow-sm settings-panel" aria-label="Settings">
         <header className="header">
           <h1>Settings</h1>
@@ -2189,24 +2299,8 @@ export const ArchivedProjectsPage = ({ api }: Readonly<{ api: ApplicationApi }>)
   const selectedProject = archived.find((project) => project.id === selectedProjectId);
   const archivedTaskRoots = (tasks.data ?? []).filter((task) => task.projectId === selectedProjectId && task.parentId === null);
   return <main className="shell app-layout">
-    <button type="button" className="mobile-menu-toggle" aria-label="Open navigation" aria-expanded={mobileSidebarOpen} onClick={() => setMobileSidebarOpen(true)}><Menu size={23} aria-hidden="true" /></button>
-    {mobileSidebarOpen ? <button type="button" className="mobile-sidebar-backdrop" aria-label="Close navigation" onClick={() => setMobileSidebarOpen(false)} /> : null}
-    <aside className={clsx("sidebar card shadow-sm", mobileSidebarOpen && "mobile-sidebar-open")} aria-label="Navigation" ref={sidebarScroll.ref} onScroll={sidebarScroll.onScroll}>
-      <button type="button" className="mobile-sidebar-close" aria-label="Close navigation" onClick={() => setMobileSidebarOpen(false)}><X size={21} aria-hidden="true" /></button>
-      <div className="sidebar-brand"><span className="brand-mark">T</span><strong>Todoist Clone</strong></div>
-      <SearchPalette tasks={flattenTaskNodes(tasks.data ?? Object.freeze([]))} projects={(projects.data ?? []).filter((project) => !project.archived)} sections={sections.data ?? Object.freeze([])} onTaskSelect={(task) => { setMobileSidebarOpen(false); navigate(`/?task=${encodeURIComponent(task.id)}`); }} />
-      <Link className="nav-button add-task-nav-button" to="/?addTask=1"><Plus size={17} aria-hidden="true" />Add task <kbd>Q</kbd></Link>
-      <Link className="nav-button nav-link-button" to="/"><Inbox size={16} aria-hidden="true" />Inbox</Link>
-      <Link className="nav-button nav-link-button" to="/dates"><CalendarDays size={16} aria-hidden="true" />Dates</Link>
-      <Link className="nav-button nav-link-button" to="/labels"><Tag size={16} aria-hidden="true" />Labels</Link>
-      <Link className="nav-button nav-link-button" to="/export"><Download size={16} aria-hidden="true" />Export</Link>
-      {toolsEnabled ? <Link className="nav-button nav-link-button" to="/tools"><Code2 size={16} aria-hidden="true" />Tools</Link> : null}
-      <Link className="nav-button nav-link-button" to="/settings"><Settings size={16} aria-hidden="true" />Settings</Link>
-      <Link className="nav-button nav-link-button active" to="/archived-projects"><Archive size={16} aria-hidden="true" />Archived projects</Link>
-      <div className="sidebar-group"><h2>My Projects</h2>{(projects.data ?? []).filter((project) => !project.archived).map((project) => <Link className="nav-button nav-link-button project-tool-link" key={project.id} title={project.title} to={`/?project=${encodeURIComponent(project.id)}`}><span>{project.title}</span></Link>)}</div>
-      <div className="sidebar-create-block"><form className="compact-form m-0" onSubmit={async (event) => { event.preventDefault(); const title = navigationProjectTitle.trim(); if (!title) return; await api.createProject(title); setNavigationProjectTitle(""); await queryClient.invalidateQueries({ queryKey: projectQueryKey }); }}><label htmlFor="archived-navigation-project-title">Project title</label><input id="archived-navigation-project-title" value={navigationProjectTitle} onChange={(event) => setNavigationProjectTitle(event.target.value)} /><button type="submit"><Plus size={16} aria-hidden="true" />Add project</button></form></div>
-    </aside>
-    <section className="workspace card shadow-sm"><h1>Archived projects</h1>
+    <AppSidebar api={api} />
+      <section className="workspace card shadow-sm"><h1>Archived projects</h1>
       {archived.length === 0 ? <p className="empty">No archived projects.</p> : archived.map((project) => <article className="archived-project" key={project.id}><strong>{project.title}</strong><div><button type="button" onClick={() => setSelectedProjectId((current) => current === project.id ? null : project.id)}>{selectedProjectId === project.id ? "Hide tasks" : "View tasks"}</button><button type="button" onClick={() => void restore(project)}>Restore</button><button type="button" className="danger" onClick={() => void remove(project)}>Delete</button></div></article>)}
       {selectedProject !== undefined ? <section className="archived-task-view" aria-label={`${selectedProject.title} tasks`}><h2>{selectedProject.title} tasks</h2>{tasks.isLoading ? <p>Loading tasks…</p> : archivedTaskRoots.length === 0 ? <p className="empty">This project has no tasks.</p> : renderTasks(archivedTaskRoots)}</section> : null}
     </section>

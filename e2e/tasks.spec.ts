@@ -550,3 +550,31 @@ test("nests a project with touch dragging in the mobile sidebar", async ({ page 
     await cdp.detach();
   }
 });
+
+test("keeps the shared mobile sidebar consistent and closes it after navigation", async ({ page }, testInfo) => {
+  const projectTitle = `Shared sidebar project ${Date.now()}-${testInfo.workerIndex}`;
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await createProject(page)(projectTitle);
+
+  const sidebar = page.getByRole("navigation", { name: "Navigation" });
+  const expectSidebarClosed = async () => {
+    await expect(sidebar).not.toHaveClass(/mobile-sidebar-open/);
+    await expect(page.getByRole("button", { name: "Open navigation" })).toHaveAttribute("aria-expanded", "false");
+  };
+  const selectNavigationItem = async (name: string, expectedPath: string) => {
+    await page.getByRole("button", { name: "Open navigation" }).click();
+    await expect(sidebar).toHaveClass(/mobile-sidebar-open/);
+    await sidebar.getByRole("link", { name, exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`${expectedPath.replaceAll("/", "\\/")}(?:\\?.*)?$`));
+    await expectSidebarClosed();
+    await expect(sidebar.getByRole("link", { name: "Settings", exact: true })).toBeVisible();
+    await expect(sidebar.locator(".project-nav-row").filter({ has: page.getByRole("link", { name: projectTitle, exact: true }) }).getByRole("button", { name: `Drag project ${projectTitle}` })).toBeVisible();
+  };
+
+  await selectNavigationItem("Dates", "/dates");
+  await selectNavigationItem("Tools", "/tools");
+  await selectNavigationItem("Settings", "/settings");
+  await selectNavigationItem("Archived projects", "/archived-projects");
+  await selectNavigationItem("Inbox", "/");
+});
