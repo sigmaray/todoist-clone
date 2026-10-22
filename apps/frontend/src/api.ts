@@ -1,4 +1,4 @@
-import type { Priority, Project, ProjectId, Section, SectionId, Task, TaskNode } from "@todoist-clonse/domain";
+import type { Priority, Project, ProjectId, Section, SectionId, Task, TaskNode } from "@todoist-clone/domain";
 
 export type TaskApi = Readonly<{
   listTasks: () => Promise<ReadonlyArray<TaskNode>>;

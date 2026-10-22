@@ -1,5 +1,5 @@
 {
-  "name": "@todoist-clonse/frontend",
+  "name": "@todoist-clone/frontend",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -14,7 +14,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@floating-ui/react": "^0.27.20",
     "@tanstack/react-query": "^5.62.7",
-    "@todoist-clonse/domain": "workspace:*",
+    "@todoist-clone/domain": "workspace:*",
     "@vitejs/plugin-react": "^4.3.4",
     "bootstrap": "^5.3.8",
     "clsx": "^2.1.1",

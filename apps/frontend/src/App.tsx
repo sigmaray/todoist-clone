@@ -8,8 +8,8 @@ import {
   computeIndentPlacement,
   computeOutdentPlacement,
   renderTaskMarkdownDocument
-} from "@todoist-clonse/domain";
-import type { Project, ProjectId, Section, SectionId, Task, TaskId, TaskNode } from "@todoist-clonse/domain";
+} from "@todoist-clone/domain";
+import type { Project, ProjectId, Section, SectionId, Task, TaskId, TaskNode } from "@todoist-clone/domain";
 import clsx from "clsx";
 import JSZip from "jszip";
 import { Archive, ClipboardCopy, Code2, Database, Edit3, Inbox, Plus, Trash2, X } from "lucide-react";
@@ -785,7 +785,7 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
   };
 
   const exportZip = async () => {
-    downloadBlob(await createZipBlob(allMarkdownFiles(allProjects, allSections, allTasks)), "todoist-clonse-markdown.zip");
+    downloadBlob(await createZipBlob(allMarkdownFiles(allProjects, allSections, allTasks)), "todoist-clone-markdown.zip");
   };
 
   const allMarkdown = allMarkdownFiles(allProjects, allSections, allTasks)
@@ -793,7 +793,7 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
     .join("\n\n---\n\n");
 
   const exportMarkdown = () => {
-    downloadBlob(new Blob([allMarkdown], { type: "text/markdown;charset=utf-8" }), "todoist-clonse.md");
+    downloadBlob(new Blob([allMarkdown], { type: "text/markdown;charset=utf-8" }), "todoist-clone.md");
   };
 
   return (
@@ -802,7 +802,7 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
       <aside className="sidebar card shadow-sm" aria-label="Navigation">
         <div className="sidebar-brand">
           <span className="brand-mark">T</span>
-          <strong>Todoist Clonse</strong>
+          <strong>Todoist Clone</strong>
         </div>
         <button
           type="button"
@@ -1054,6 +1054,11 @@ export const TaskApp = ({ api }: Readonly<{ api: TaskApi }>) => {
             role="dialog"
             aria-modal="true"
             aria-label="Markdown preview"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                setMarkdownModal(null);
+              }
+            }}
           >
             <header className="markdown-modal-header">
               <h2>{markdownModal.title} markdown</h2>
@@ -1109,7 +1114,7 @@ export const ToolsPage = ({ api }: Readonly<{ api: ToolsApi }>) => {
         <aside className="sidebar card shadow-sm" aria-label="Navigation">
           <div className="sidebar-brand">
             <span className="brand-mark">T</span>
-            <strong>Todoist Clonse</strong>
+            <strong>Todoist Clone</strong>
           </div>
           <a className="nav-button nav-link-button" href="/">
             <Inbox size={16} aria-hidden="true" />
@@ -1131,7 +1136,7 @@ export const ToolsPage = ({ api }: Readonly<{ api: ToolsApi }>) => {
       <aside className="sidebar card shadow-sm" aria-label="Navigation">
         <div className="sidebar-brand">
           <span className="brand-mark">T</span>
-          <strong>Todoist Clonse</strong>
+          <strong>Todoist Clone</strong>
         </div>
         <a className="nav-button nav-link-button" href="/">
           <Inbox size={16} aria-hidden="true" />

@@ -1,5 +1,5 @@
 {
-  "name": "todoist-clonse",
+  "name": "todoist-clone",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -7,8 +7,8 @@
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "test:e2e": "playwright test",
-    "dev:backend": "pnpm --filter @todoist-clonse/backend dev",
-    "dev:frontend": "pnpm --filter @todoist-clonse/frontend dev"
+    "dev:backend": "pnpm --filter @todoist-clone/backend dev",
+    "dev:frontend": "pnpm --filter @todoist-clone/frontend dev"
   },
   "devDependencies": {
     "@playwright/test": "^1.56.1",

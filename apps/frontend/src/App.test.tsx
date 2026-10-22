@@ -1,5 +1,5 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import type { Project, Section, Task, TaskNode } from "@todoist-clonse/domain";
+import type { Project, Section, Task, TaskNode } from "@todoist-clone/domain";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -561,6 +561,8 @@ describe("TaskApp", () => {
 
     expect(await screen.findByRole("dialog", { name: "Markdown preview" })).toBeInTheDocument();
     expect(screen.getByText(/- \[x\] Plan MVP \(P1\)/)).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "Markdown preview" }), { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Markdown preview" })).not.toBeInTheDocument();
   });
 
   it("previews markdown for all tasks from the sidebar", async () => {

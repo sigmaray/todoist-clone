@@ -258,7 +258,7 @@ test("creates projects, sections, subtasks, and exports markdown", async ({ cont
 
   const download = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export all ZIP" }).click();
-  await expect((await download).suggestedFilename()).toBe("todoist-clonse-markdown.zip");
+  await expect((await download).suggestedFilename()).toBe("todoist-clone-markdown.zip");
 
   await page.getByRole("button", { name: `Delete section ${sectionTitle} edited` }).click();
   await expect(page.getByRole("heading", { name: `${sectionTitle} edited` })).not.toBeVisible();

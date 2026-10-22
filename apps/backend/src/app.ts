@@ -1,4 +1,4 @@
-import { buildTaskTree } from "@todoist-clonse/domain";
+import { buildTaskTree } from "@todoist-clone/domain";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";

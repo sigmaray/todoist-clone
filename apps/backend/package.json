@@ -1,5 +1,5 @@
 {
-  "name": "@todoist-clonse/backend",
+  "name": "@todoist-clone/backend",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.19.6",
-    "@todoist-clonse/domain": "workspace:*",
+    "@todoist-clone/domain": "workspace:*",
     "cors": "^2.8.5",
     "drizzle-orm": "^0.44.7",
     "hono": "^4.9.9",

@@ -1,4 +1,4 @@
-# Todoist Clonse
+# Todoist Clone
 
 Self-hosted Todoist-style task manager MVP. The project is a pnpm monorepo with a pure functional domain package, a Hono backend, and a React/Vite frontend.
 

@@ -45,9 +45,9 @@ services:
         corepack prepare pnpm@11.20.0 --activate
         pnpm config set store-dir /pnpm/store
         pnpm install --frozen-lockfile
-        pnpm --filter @todoist-clonse/backend exec drizzle-kit migrate --config drizzle.config.ts
-        pnpm --filter @todoist-clonse/backend dev &
-        pnpm --filter @todoist-clonse/frontend dev --host 0.0.0.0
+        pnpm --filter @todoist-clone/backend exec drizzle-kit migrate --config drizzle.config.ts
+        pnpm --filter @todoist-clone/backend dev &
+        pnpm --filter @todoist-clone/frontend dev --host 0.0.0.0
 
 volumes:
   postgres-data:

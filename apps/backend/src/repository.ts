@@ -1,5 +1,5 @@
-import { generateLexicalOrder } from "@todoist-clonse/domain";
-import type { Priority, Project, ProjectId, Section, SectionId, Task, TaskId } from "@todoist-clonse/domain";
+import { generateLexicalOrder } from "@todoist-clone/domain";
+import type { Priority, Project, ProjectId, Section, SectionId, Task, TaskId } from "@todoist-clone/domain";
 
 export type TaskPatch = Readonly<{
   title?: string;

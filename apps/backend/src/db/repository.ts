@@ -1,5 +1,5 @@
-import { generateLexicalOrder } from "@todoist-clonse/domain";
-import type { Priority, Project, ProjectId, Section, SectionId, Task, TaskId } from "@todoist-clonse/domain";
+import { generateLexicalOrder } from "@todoist-clone/domain";
+import type { Priority, Project, ProjectId, Section, SectionId, Task, TaskId } from "@todoist-clone/domain";
 import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";

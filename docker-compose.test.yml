@@ -40,7 +40,7 @@ services:
         pnpm config set store-dir /pnpm/store
         pnpm install --frozen-lockfile
         pnpm test
-        pnpm --filter @todoist-clonse/backend exec drizzle-kit migrate --config drizzle.config.ts
+        pnpm --filter @todoist-clone/backend exec drizzle-kit migrate --config drizzle.config.ts
         pnpm test:e2e
 
 volumes:
