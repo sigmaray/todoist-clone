@@ -165,6 +165,29 @@ beforeEach(() => {
 });
 
 describe("TaskApp", () => {
+  it("reveals optional Add task fields from mobile shortcuts and focuses their inputs", async () => {
+    renderApp(baseApi(Object.freeze([])));
+    await userEvent.click(await screen.findByRole("button", { name: "Add task Q" }));
+    const dialog = screen.getByRole("dialog", { name: "Add task" });
+    const shortcuts = within(dialog.querySelector(".add-task-mobile-shortcuts") as HTMLElement);
+
+    await userEvent.click(shortcuts.getByRole("button", { name: "Add description" }));
+    expect(within(dialog).getByLabelText("New task description")).toHaveFocus();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Clear description and hide section" }));
+    expect(shortcuts.getByRole("button", { name: "Add description" })).toBeInTheDocument();
+
+    await userEvent.click(shortcuts.getByRole("button", { name: "Add labels" }));
+    expect(within(dialog).getByLabelText("New task labels")).toHaveFocus();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Remove labels and hide section" }));
+    expect(shortcuts.getByRole("button", { name: "Add labels" })).toBeInTheDocument();
+
+    await userEvent.click(shortcuts.getByRole("button", { name: "Add date" }));
+    const dateDialog = within(dialog).getByRole("dialog", { name: "Add date" });
+    expect(within(dateDialog).getByLabelText("New task date")).toHaveFocus();
+    await userEvent.click(within(dateDialog).getByRole("button", { name: "Cancel" }));
+    expect(shortcuts.getByRole("button", { name: "Add date" })).toBeInTheDocument();
+  });
+
   it("reveals and focuses the subtask editor from Add subtasks", async () => {
     renderApp(baseApi(Object.freeze([task({ id: "task-1", title: "Plan release" })])));
     await userEvent.click(await screen.findByRole("button", { name: "Plan release" }));

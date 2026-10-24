@@ -948,6 +948,9 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const [addTaskDateBeforePicker, setAddTaskDateBeforePicker] = useState("");
   const [addTaskLabels, setAddTaskLabels] = useState<ReadonlyArray<string>>(Object.freeze([]));
   const [addTaskLabelInput, setAddTaskLabelInput] = useState("");
+  const [showAddTaskDescription, setShowAddTaskDescription] = useState(false);
+  const [showAddTaskDate, setShowAddTaskDate] = useState(false);
+  const [showAddTaskLabels, setShowAddTaskLabels] = useState(false);
   const [addTaskPlacement, setAddTaskPlacement] = useState(inboxPlacement);
   const [title, setTitle] = useState("");
   const [projectTitle, setProjectTitle] = useState("");
@@ -1038,7 +1041,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
         event.preventDefault();
         setAddTaskPlacement(currentPath === "/" ? (targetSectionId === null ? targetProjectId === null ? inboxPlacement : projectPlacement(targetProjectId) : sectionPlacement(targetSectionId)) : inboxPlacement);
         setAddTaskPlacement(currentPath === "/" ? (targetSectionId === null ? targetProjectId === null ? inboxPlacement : projectPlacement(targetProjectId) : sectionPlacement(targetSectionId)) : inboxPlacement);
-        setAddTaskTitle(""); setAddTaskDescription(""); setAddTaskDate(""); setAddTaskLabels(Object.freeze([])); setAddTaskLabelInput(""); setAddTaskOpen(true);
+        setAddTaskTitle(""); setAddTaskDescription(""); setAddTaskDate(""); setAddTaskLabels(Object.freeze([])); setAddTaskLabelInput(""); setShowAddTaskDescription(false); setShowAddTaskDate(false); setShowAddTaskLabels(false); setAddTaskOpen(true);
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -1842,6 +1845,9 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     setAddTaskDate("");
     setAddTaskLabels(Object.freeze([]));
     setAddTaskLabelInput("");
+    setShowAddTaskDescription(false);
+    setShowAddTaskDate(false);
+    setShowAddTaskLabels(false);
     setAddTaskOpen(true);
   };
   const deleteAllTasks = async () => {
@@ -1914,6 +1920,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={finishDndDrag}>
     <main className="shell app-layout">
       <AppSidebar api={api} selectedProjectId={targetProjectId} onInboxSelect={() => { setTargetProjectId(null); setTargetSectionId(null); }} onProjectSelect={(id) => { setTargetProjectId(id); setTargetSectionId(null); }} onTaskSelect={(task) => { const node = findTaskNode(allTasks, task.id); if (node !== null) openDetails(node); }} onAddTask={() => openAddTaskDialog(pageMode === "tasks" ? (targetSectionId === null ? targetProjectId === null ? inboxPlacement : projectPlacement(targetProjectId) : sectionPlacement(targetSectionId)) : inboxPlacement)} isProjectDropActive={(id) => activeDropZone === (id === null ? inboxPlacement : projectPlacement(id))} onInboxDragEnter={markDropZone(null, null)} onInboxDragOver={markDropZone(null, null)} onInboxDragLeave={() => setActiveDropZone(null)} onInboxDrop={moveDroppedTask(null, null)} onProjectDragEnter={(id) => markDropZone(id, null)} onProjectDragOver={(id) => markDropZone(id, null)} onProjectDragLeave={() => () => setActiveDropZone(null)} onProjectDrop={(id) => moveDroppedTask(id, null)} />
+      <button type="button" className="mobile-quick-add" aria-label="Quick add task" onClick={() => openAddTaskDialog(pageMode === "tasks" ? (targetSectionId === null ? targetProjectId === null ? inboxPlacement : projectPlacement(targetProjectId) : sectionPlacement(targetSectionId)) : inboxPlacement)}><Plus size={25} aria-hidden="true" /></button>
 
       <section className="workspace card shadow-sm" aria-label="Task manager">
         <header className="header">
@@ -2176,15 +2183,20 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
             setAddTaskOpen(false);
           }}>
             <label>Task name<AutoGrowTextarea autoFocus ariaLabel="New task title" value={addTaskTitle} onChange={setAddTaskTitle} required onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} /></label>
-            <label>Description<AutoGrowTextarea ariaLabel="New task description" value={addTaskDescription} onChange={setAddTaskDescription} /></label>
+            <label className={`add-task-optional${!addTaskDescription && !showAddTaskDescription ? " add-task-optional-hidden" : ""}`}><div className="add-task-mobile-heading"><span>Description</span><button type="button" className="add-task-mobile-collapse" aria-label="Clear description and hide section" onClick={() => { setAddTaskDescription(""); setShowAddTaskDescription(false); }}><X size={17} aria-hidden="true" /></button></div><AutoGrowTextarea autoFocus={showAddTaskDescription && !addTaskDescription} ariaLabel="New task description" value={addTaskDescription} onChange={setAddTaskDescription} /></label>
             <label>Project or section<select aria-label="Add task project" value={addTaskPlacement} onChange={(event) => setAddTaskPlacement(event.target.value)}>
               {createPlacementOptions(activeProjects, allSections.filter((section) => section.projectId === null || activeProjects.some((project) => project.id === section.projectId))).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select></label>
-            <label>Date{addTaskDate ? <div className="task-detail-meta-value"><button type="button" className="task-detail-date" onClick={() => { setAddTaskDateBeforePicker(addTaskDate); setAddTaskDatePickerOpen(true); }}>{new Date(`${addTaskDate}T00:00:00`).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}</button><button type="button" aria-label="Remove task date" onClick={() => setAddTaskDate("")}>×</button></div> : <button type="button" aria-label="Add date" className="btn-primary add-task-date-button" onClick={() => { setAddTaskDateBeforePicker(addTaskDate); setAddTaskDatePickerOpen(true); }}>＋ Add date</button>}</label>
-            <div className="add-task-labels"><span className="form-field-label">Labels</span><LabelPicker selected={addTaskLabels} options={availableLabels} inputLabel="New task labels" inputValue={addTaskLabelInput} onInputChange={setAddTaskLabelInput} onChange={setAddTaskLabels} /></div>
+            <div className="add-task-mobile-shortcuts">
+              {!addTaskDescription && !showAddTaskDescription ? <button type="button" onClick={() => setShowAddTaskDescription(true)}>Add description</button> : null}
+              {!addTaskDate && !showAddTaskDate ? <button type="button" onClick={() => { setShowAddTaskDate(true); setAddTaskDateBeforePicker(addTaskDate); setAddTaskDatePickerOpen(true); }}>Add date</button> : null}
+              {!addTaskLabels.length && !showAddTaskLabels ? <button type="button" onClick={() => setShowAddTaskLabels(true)}>Add labels</button> : null}
+            </div>
+            <label className={`add-task-optional${!addTaskDate && !showAddTaskDate ? " add-task-optional-hidden" : ""}`}><div className="add-task-mobile-heading"><span>Date</span><button type="button" className="add-task-mobile-collapse" aria-label="Remove date and hide section" onClick={() => { setAddTaskDate(""); setShowAddTaskDate(false); }}><X size={17} aria-hidden="true" /></button></div>{addTaskDate ? <div className="task-detail-meta-value"><button type="button" className="task-detail-date" onClick={() => { setAddTaskDateBeforePicker(addTaskDate); setAddTaskDatePickerOpen(true); }}>{new Date(`${addTaskDate}T00:00:00`).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}</button><button type="button" aria-label="Remove task date" className="add-task-desktop-remove-date" onClick={() => setAddTaskDate("")}>×</button></div> : <button type="button" aria-label="Add date" className="btn-primary add-task-date-button" onClick={() => { setAddTaskDateBeforePicker(addTaskDate); setAddTaskDatePickerOpen(true); }}>＋ Add date</button>}</label>
+            <div className={`add-task-labels add-task-optional${!addTaskLabels.length && !showAddTaskLabels ? " add-task-optional-hidden" : ""}`}><div className="add-task-mobile-heading"><span className="form-field-label">Labels</span><button type="button" className="add-task-mobile-collapse" aria-label="Remove labels and hide section" onClick={() => { setAddTaskLabels(Object.freeze([])); setAddTaskLabelInput(""); setShowAddTaskLabels(false); }}><X size={17} aria-hidden="true" /></button></div><LabelPicker autoFocus={showAddTaskLabels && !addTaskLabels.length} selected={addTaskLabels} options={availableLabels} inputLabel="New task labels" inputValue={addTaskLabelInput} onInputChange={setAddTaskLabelInput} onChange={setAddTaskLabels} /></div>
             <div><button type="button" onClick={() => setAddTaskOpen(false)}>Cancel</button><button type="submit" className="btn-primary">Add task</button></div>
           </form>
-          {addTaskDatePickerOpen ? <div className="task-date-picker-backdrop"><section className="task-date-picker" role="dialog" aria-modal="true" aria-label="Add date" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setAddTaskDate(addTaskDateBeforePicker); setAddTaskDatePickerOpen(false); } }}><h3>Add date</h3><DatePickerPanel inputLabel="New task date" value={addTaskDate} onChange={setAddTaskDate} /><div className="task-date-picker-actions"><button type="button" onClick={() => { setAddTaskDate(addTaskDateBeforePicker); setAddTaskDatePickerOpen(false); }}>Cancel</button><button type="button" className="btn-primary" onClick={() => setAddTaskDatePickerOpen(false)}>Set date</button></div></section></div> : null}
+          {addTaskDatePickerOpen ? <div className="task-date-picker-backdrop"><section className="task-date-picker" role="dialog" aria-modal="true" aria-label="Add date" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setAddTaskDate(addTaskDateBeforePicker); setAddTaskDatePickerOpen(false); if (!addTaskDateBeforePicker) setShowAddTaskDate(false); } }}><h3>Add date</h3><DatePickerPanel autoFocus inputLabel="New task date" value={addTaskDate} onChange={setAddTaskDate} /><div className="task-date-picker-actions"><button type="button" onClick={() => { setAddTaskDate(addTaskDateBeforePicker); setAddTaskDatePickerOpen(false); if (!addTaskDateBeforePicker) setShowAddTaskDate(false); }}>Cancel</button><button type="button" className="btn-primary" onClick={() => setAddTaskDatePickerOpen(false)}>Set date</button></div></section></div> : null}
         </section>
       </div> : null}
       {selectedDetailsTask !== null ? (

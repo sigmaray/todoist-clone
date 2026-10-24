@@ -304,6 +304,52 @@ test("adapts the Add date picker to a small mobile viewport", async ({ page }) =
   await expect(addTaskDialog).toBeVisible();
 });
 
+test("keeps optional Add task fields collapsed on mobile until requested", async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 360, height: 640 }, isMobile: true, hasTouch: true });
+  const page = await context.newPage();
+  try {
+    await page.goto("/");
+    const quickAdd = page.getByRole("button", { name: "Quick add task" });
+    await expect(quickAdd).toBeVisible();
+    const quickAddBounds = await quickAdd.boundingBox();
+    if (quickAddBounds === null) throw new Error("Mobile quick-add button must be visible");
+    expect(quickAddBounds.x + quickAddBounds.width).toBeLessThanOrEqual(360);
+    expect(quickAddBounds.y + quickAddBounds.height).toBeLessThanOrEqual(640);
+    await quickAdd.click();
+    const dialog = page.getByRole("dialog", { name: "Add task" });
+    const shortcuts = dialog.locator(".add-task-mobile-shortcuts");
+
+    await expect(dialog.getByLabel("New task description")).toBeHidden();
+    await shortcuts.getByRole("button", { name: "Add description" }).click();
+    await expect(dialog.getByLabel("New task description")).toBeFocused();
+    await dialog.getByRole("button", { name: "Clear description and hide section" }).click();
+    await expect(shortcuts.getByRole("button", { name: "Add description" })).toBeVisible();
+
+    await shortcuts.getByRole("button", { name: "Add labels" }).click();
+    await expect(dialog.getByLabel("New task labels")).toBeFocused();
+    await dialog.getByRole("button", { name: "Remove labels and hide section" }).click();
+    await expect(shortcuts.getByRole("button", { name: "Add labels" })).toBeVisible();
+
+    await shortcuts.getByRole("button", { name: "Add date" }).click();
+    const dateDialog = dialog.getByRole("dialog", { name: "Add date" });
+    await expect(dateDialog).toBeVisible();
+    await expect(dateDialog.getByLabel("New task date")).toBeFocused();
+  } finally {
+    await context.close();
+  }
+});
+
+test("does not show mobile Add task shortcuts in the desktop dialog", async ({ page }) => {
+  await page.setViewportSize({ width: 800, height: 900 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Add task Q" }).click();
+  const dialog = page.getByRole("dialog", { name: "Add task" });
+  await expect(dialog.locator(".add-task-mobile-shortcuts")).toBeHidden();
+  await expect(dialog.getByLabel("New task description")).toBeVisible();
+  await expect(dialog.getByLabel("Add task project")).toBeVisible();
+  await expect(dialog.getByLabel("New task labels")).toBeVisible();
+});
+
 test("shows truncated descriptions and comment counts in task rows", async ({ page }, testInfo) => {
   const title = `Task row details ${testInfo.workerIndex}-${Date.now()}`;
   const description = Array.from({ length: 24 }, () => "A long task description").join(" ");
