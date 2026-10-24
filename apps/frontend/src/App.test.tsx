@@ -251,6 +251,7 @@ describe("TaskApp", () => {
     await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", { dueDate: "2026-11-01" }));
     await userEvent.type(within(dialog).getByLabelText("Labels"), "work{Enter}");
     await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", { labels: ["work"] }));
+    vi.stubGlobal("crypto", Object.freeze({}));
     await userEvent.type(within(dialog).getByLabelText("Add comment"), "Looks good");
     await userEvent.click(within(dialog).getByRole("button", { name: "Add comment" }));
     await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", expect.objectContaining({ comments: [expect.objectContaining({ body: "Looks good" })] })));
