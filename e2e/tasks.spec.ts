@@ -227,17 +227,42 @@ test("adapts task details to a small mobile viewport", async ({ page }, testInfo
 
   const layout = dialog.locator(".task-details-layout");
   expect(await layout.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await expect(dialog.locator(".task-subtasks-card")).toBeHidden();
+  await dialog.getByRole("button", { name: "Add subtasks" }).click();
+  await expect(dialog.locator(".task-subtasks-card")).toBeVisible();
+  await expect(dialog.getByLabel("New subtask title")).toBeFocused();
+  const subtaskTitle = `Visible mobile subtask ${testInfo.workerIndex}-${Date.now()}`;
+  await dialog.getByLabel("New subtask title").fill(subtaskTitle);
+  await dialog.locator(".details-subtask-add").getByRole("button", { name: "Add", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: subtaskTitle, exact: true })).toBeVisible();
+  expect(await dialog.locator(".task-subtasks-card").evaluate((card) => {
+    const cardRect = card.getBoundingClientRect();
+    const bodyRect = card.querySelector(".task-subtasks-body")?.getBoundingClientRect();
+    return bodyRect !== undefined && bodyRect !== null && bodyRect.bottom <= cardRect.bottom;
+  })).toBe(true);
   const metadataTop = await dialog.locator(".task-details-sidebar").evaluate((element) => element.getBoundingClientRect().top);
   const subtasksTop = await dialog.locator(".task-subtasks-card").evaluate((element) => element.getBoundingClientRect().top);
   expect(metadataTop).toBeLessThan(subtasksTop);
 
   await dialog.getByLabel("Project, section, or Inbox").scrollIntoViewIfNeeded();
   await expect(dialog.getByLabel("Project, section, or Inbox")).toBeVisible();
-  await dialog.getByLabel("Add comment").scrollIntoViewIfNeeded();
+  await expect(dialog.locator(".task-comments")).toBeHidden();
+  await expect(dialog.getByRole("button", { name: "Add labels" })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Add comments" })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Add date" })).toBeVisible();
+  await dialog.getByRole("button", { name: "Add labels" }).click();
+  await expect(dialog.getByLabel("Labels")).toBeFocused();
+  await dialog.getByRole("button", { name: "Add comments" }).click();
+  await expect(dialog.locator(".task-comments")).toBeVisible();
+  await expect(dialog.getByLabel("Add comment")).toBeFocused();
   expect(await dialog.locator(".task-comments").evaluate((comments) => {
     const button = comments.querySelector<HTMLElement>(".btn-primary");
     return button !== null && button.getBoundingClientRect().width >= comments.getBoundingClientRect().width - 33;
   })).toBe(true);
+  await dialog.getByRole("button", { name: "Add date" }).click();
+  const dateDialog = dialog.getByRole("dialog", { name: "Add date" });
+  await expect(dateDialog).toBeVisible();
+  await expect(dateDialog.getByLabel("New date")).toBeFocused();
 });
 
 test("adapts the Add date picker to a small mobile viewport", async ({ page }) => {

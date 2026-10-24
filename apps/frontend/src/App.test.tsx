@@ -165,6 +165,113 @@ beforeEach(() => {
 });
 
 describe("TaskApp", () => {
+  it("reveals and focuses the subtask editor from Add subtasks", async () => {
+    renderApp(baseApi(Object.freeze([task({ id: "task-1", title: "Plan release" })])));
+    await userEvent.click(await screen.findByRole("button", { name: "Plan release" }));
+    const dialog = screen.getByRole("dialog", { name: "Task details: Plan release" });
+    expect(dialog.querySelector(".task-subtasks-card")).toHaveClass("task-subtasks-hidden");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Add subtasks" }));
+    expect(within(dialog).getByLabelText("New subtask title")).toHaveFocus();
+    expect(dialog.querySelector(".task-subtasks-card")).toHaveClass("task-subtasks-open");
+    expect(within(dialog).queryByRole("button", { name: "Add subtasks" })).not.toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete all subtasks and hide section" }));
+    expect(within(dialog).getByRole("button", { name: "Add subtasks" })).toBeInTheDocument();
+  });
+
+  it("deletes existing subtasks when their mobile section is closed", async () => {
+    let childDeleted = false;
+    const child = task({ id: "child-1", title: "Write tests", parentId: "task-1" });
+    const parentWithChild = task({ id: "task-1", title: "Plan release", children: Object.freeze([child]) });
+    const parentWithoutChild = task({ id: "task-1", title: "Plan release" });
+    const deleteTask = vi.fn(async () => { childDeleted = true; });
+    const api = Object.freeze({
+      ...baseApi(Object.freeze([parentWithChild])),
+      listTasks: async () => Object.freeze([childDeleted ? parentWithoutChild : parentWithChild]),
+      deleteTask
+    });
+    renderApp(api);
+    await userEvent.click(await screen.findByRole("button", { name: "Plan release" }));
+    const dialog = screen.getByRole("dialog", { name: "Task details: Plan release" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete all subtasks and hide section" }));
+    await waitFor(() => expect(deleteTask).toHaveBeenCalledWith("child-1"));
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Add subtasks" })).toBeInTheDocument());
+  });
+
+  it("focuses the label input when Add labels reveals the editor", async () => {
+    renderApp(baseApi(Object.freeze([task({ id: "task-1", title: "Plan release" })])));
+    await userEvent.click(await screen.findByRole("button", { name: "Plan release" }));
+    const dialog = screen.getByRole("dialog", { name: "Task details: Plan release" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Add labels" }));
+    expect(within(dialog).getByLabelText("Labels")).toHaveFocus();
+  });
+
+  it("focuses the comment input when Add comments reveals the editor", async () => {
+    renderApp(baseApi(Object.freeze([task({ id: "task-1", title: "Plan release" })])));
+    await userEvent.click(await screen.findByRole("button", { name: "Plan release" }));
+    const dialog = screen.getByRole("dialog", { name: "Task details: Plan release" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Add comments" }));
+    expect(within(dialog).getByLabelText("Add comment")).toHaveFocus();
+  });
+
+  it("removes labels, comments, and date when their mobile sections are closed", async () => {
+    const updateTask = vi.fn(async (id: string, patch: Parameters<ApplicationApi["updateTask"]>[1]): Promise<Task> => task({
+      id,
+      title: "Plan release",
+      labels: patch.labels ?? ["work"],
+      comments: patch.comments ?? [Object.freeze({ id: "comment-1", body: "Note", createdAt: "2026-01-01T00:00:00.000Z" })],
+      dueDate: patch.dueDate === null ? null : "2026-01-03"
+    }));
+    renderApp(Object.freeze({ ...baseApi(Object.freeze([task({
+      id: "task-1",
+      title: "Plan release",
+      labels: Object.freeze(["work"]),
+      comments: Object.freeze([Object.freeze({ id: "comment-1", body: "Note", createdAt: "2026-01-01T00:00:00.000Z" })]),
+      dueDate: "2026-01-03"
+    })])), updateTask }));
+    await userEvent.click(await screen.findByRole("button", { name: "Plan release" }));
+    const dialog = screen.getByRole("dialog", { name: "Task details: Plan release" });
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Remove all labels and hide section" }));
+    await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", { labels: [] }));
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Add labels" })).toBeInTheDocument());
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Remove all comments and hide section" }));
+    await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", { comments: [] }));
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Add comments" })).toBeInTheDocument());
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Remove date and hide section" }));
+    await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", { dueDate: null }));
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Add date" })).toBeInTheDocument());
+  });
+
+  it("asks before removing saved labels, comments, and subtasks from mobile sections", async () => {
+    const updateTask = vi.fn(async (id: string, patch: Parameters<ApplicationApi["updateTask"]>[1]): Promise<Task> => task({ id, title: "Plan release", ...patch }));
+    const deleteTask = vi.fn(async () => undefined);
+    const child = task({ id: "child-1", title: "Write tests", parentId: "task-1" });
+    const savedTask = task({
+      id: "task-1",
+      title: "Plan release",
+      labels: Object.freeze(["work"]),
+      comments: Object.freeze([Object.freeze({ id: "comment-1", body: "Saved note", createdAt: "2026-01-01T00:00:00.000Z" })]),
+      children: Object.freeze([child])
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    renderApp(Object.freeze({ ...baseApi(Object.freeze([savedTask])), updateTask, deleteTask }));
+    await userEvent.click(await screen.findByRole("button", { name: "Plan release" }));
+    const dialog = screen.getByRole("dialog", { name: "Task details: Plan release" });
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Remove all labels and hide section" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Remove all comments and hide section" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete all subtasks and hide section" }));
+
+    expect(window.confirm).toHaveBeenCalledTimes(3);
+    expect(window.confirm).toHaveBeenNthCalledWith(1, "Remove all saved labels from this task?");
+    expect(window.confirm).toHaveBeenNthCalledWith(2, "Remove all saved comments from this task?");
+    expect(window.confirm).toHaveBeenNthCalledWith(3, "Delete all saved subtasks and their descendants?");
+    expect(updateTask).not.toHaveBeenCalled();
+    expect(deleteTask).not.toHaveBeenCalled();
+  });
+
   it("closes the mobile sidebar after each route selection", async () => {
     const user = userEvent.setup();
     renderApp(baseApi(Object.freeze([])));
@@ -245,7 +352,7 @@ describe("TaskApp", () => {
     await userEvent.clear(within(dialog).getByRole("textbox", { name: "Edit task description" }));
     await userEvent.type(within(dialog).getByRole("textbox", { name: "Edit task description" }), "discard{Escape}");
     expect(within(dialog).getByRole("button", { name: "Edit task description" })).toHaveTextContent("Ship release");
-    await userEvent.click(within(dialog).getByRole("button", { name: /Add date/ }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "＋ Add date" }));
     fireEvent.change(screen.getByLabelText("New date"), { target: { value: "2026-11-01" } });
     await userEvent.click(within(screen.getByRole("dialog", { name: "Change date" })).getByRole("button", { name: "Save date" }));
     await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", { dueDate: "2026-11-01" }));
