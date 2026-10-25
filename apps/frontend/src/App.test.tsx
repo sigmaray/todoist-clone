@@ -369,7 +369,9 @@ describe("TaskApp", () => {
     renderApp(Object.freeze({ ...baseApi(Object.freeze([task({ id: "task-1", title: "Plan MVP" })])), updateTask }));
     await userEvent.click(await screen.findByRole("button", { name: "Plan MVP" }));
     const dialog = screen.getByRole("dialog", { name: "Task details: Plan MVP" });
-    await userEvent.click(within(dialog).getByRole("button", { name: "Edit task title" }));
+    const editTitleButton = within(dialog).getByRole("button", { name: "Edit task title" });
+    expect(editTitleButton.querySelector("svg")).not.toBeNull();
+    await userEvent.click(editTitleButton);
     await userEvent.clear(within(dialog).getByRole("textbox", { name: "Edit task title" }));
     await userEvent.type(within(dialog).getByRole("textbox", { name: "Edit task title" }), "Plan launch{Enter}");
     await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", { title: "Plan launch" }));
@@ -386,6 +388,7 @@ describe("TaskApp", () => {
     fireEvent.change(screen.getByLabelText("New date"), { target: { value: "2026-11-01" } });
     await userEvent.click(within(screen.getByRole("dialog", { name: "Add date" })).getByRole("button", { name: "Save date" }));
     await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", { dueDate: "2026-11-01" }));
+    expect(dialog.querySelector(".task-detail-date svg")).not.toBeNull();
     await userEvent.type(within(dialog).getByLabelText("Labels"), "work{Enter}");
     await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", { labels: ["work"] }));
     vi.stubGlobal("crypto", Object.freeze({}));
@@ -1131,16 +1134,34 @@ describe("Dates and Labels task views", () => {
 
   it("shows dated tasks and their labels with links into the label filter", async () => {
     window.history.replaceState({}, "", "/dates");
-    const datedParent = task({ id: "dated", title: "Dated note", dueDate: "2026-10-23", labels: Object.freeze(["work"]), children: Object.freeze([task({ id: "undated-child", title: "Undated child", parentId: "dated" })]) });
+    const today = new Date();
+    const isoDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+    const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+    const overdueDate = isoDate(yesterday);
+    const todayDate = isoDate(today);
+    const upcomingDate = isoDate(tomorrow);
+    const datedParent = task({ id: "dated", title: "Dated note", dueDate: overdueDate, labels: Object.freeze(["work"]), children: Object.freeze([task({ id: "undated-child", title: "Undated child", parentId: "dated" })]) });
     renderApp(baseApi(Object.freeze([
       datedParent,
+      task({ id: "today-task", title: "Today task", dueDate: todayDate }),
+      task({ id: "upcoming-task", title: "Upcoming task", dueDate: upcomingDate }),
       task({ id: "plain", title: "No date" })
     ])));
 
     expect(await screen.findByRole("button", { name: "Dated note" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Undated child" })).toBeInTheDocument();
     expect(screen.queryByText("No date")).not.toBeInTheDocument();
-    expect(screen.getByText("2026-10-23")).toBeInTheDocument();
+    const overdueTime = document.querySelector(`time[datetime="${overdueDate}"]`);
+    const todayTime = document.querySelector(`time[datetime="${todayDate}"]`);
+    const upcomingTime = document.querySelector(`time[datetime="${upcomingDate}"]`);
+    expect(overdueTime).toHaveClass("task-due-date-overdue");
+    expect(overdueTime).toHaveTextContent(overdueDate);
+    expect(overdueTime?.querySelector("svg")).not.toBeNull();
+    expect(todayTime).toHaveClass("task-due-date-upcoming");
+    expect(todayTime).toHaveTextContent("today");
+    expect(upcomingTime).toHaveClass("task-due-date-upcoming");
+    expect(upcomingTime).toHaveTextContent(upcomingDate);
     expect(screen.getByRole("link", { name: "work" })).toHaveAttribute("href", "/labels?label=work");
   });
 

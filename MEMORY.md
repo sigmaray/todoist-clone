@@ -1,5 +1,17 @@
 # Project Memory
 
+## 2026-10-25 — Clarify task due date display
+
+- Task rows, task details, and archived task entries now show a calendar icon with the due date; today is labeled `today`, upcoming dates are black, and past dates are red.
+- Added frontend assertions for overdue, today, upcoming dates, and the calendar icon.
+- Verification: frontend tests pass (48), `pnpm build` and `git diff --check` pass.
+
+## 2026-10-25 — Show title edit affordance in task details
+
+- Added a visible edit icon beside the task title in the task details dialog; clicking the title still enters edit mode.
+- Added a frontend assertion for the icon.
+- Verification: frontend tests pass (48), `pnpm build` and `git diff --check` pass.
+
 ## 2026-10-25 — Group task edit shortcuts in one row
 
 - Moved the mobile Subtasks shortcut into the task details shortcut row beside Labels and Date, with Comments following. All shortcuts use leading plus icons and wrap only when the row runs out of space.
