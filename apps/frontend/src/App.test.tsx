@@ -175,34 +175,37 @@ describe("TaskApp", () => {
     const dialog = screen.getByRole("dialog", { name: "Add task" });
     const shortcuts = within(dialog.querySelector(".add-task-mobile-shortcuts") as HTMLElement);
 
-    await userEvent.click(shortcuts.getByRole("button", { name: "Add description" }));
+    await userEvent.click(shortcuts.getByRole("button", { name: "Description" }));
     expect(within(dialog).getByLabelText("New task description")).toHaveFocus();
     await userEvent.click(within(dialog).getByRole("button", { name: "Clear description and hide section" }));
-    expect(shortcuts.getByRole("button", { name: "Add description" })).toBeInTheDocument();
+    expect(shortcuts.getByRole("button", { name: "Description" })).toBeInTheDocument();
 
-    await userEvent.click(shortcuts.getByRole("button", { name: "Add labels" }));
+    await userEvent.click(shortcuts.getByRole("button", { name: "Labels" }));
     expect(within(dialog).getByLabelText("New task labels")).toHaveFocus();
     await userEvent.click(within(dialog).getByRole("button", { name: "Remove labels and hide section" }));
-    expect(shortcuts.getByRole("button", { name: "Add labels" })).toBeInTheDocument();
+    expect(shortcuts.getByRole("button", { name: "Labels" })).toBeInTheDocument();
 
-    await userEvent.click(shortcuts.getByRole("button", { name: "Add date" }));
+    await userEvent.click(shortcuts.getByRole("button", { name: "Date" }));
     const dateDialog = within(dialog).getByRole("dialog", { name: "Add date" });
     expect(within(dateDialog).getByLabelText("New task date")).toHaveFocus();
     await userEvent.click(within(dateDialog).getByRole("button", { name: "Cancel" }));
-    expect(shortcuts.getByRole("button", { name: "Add date" })).toBeInTheDocument();
+    expect(shortcuts.getByRole("button", { name: "Date" })).toBeInTheDocument();
   });
 
-  it("reveals and focuses the subtask editor from Add subtasks", async () => {
+  it("reveals and focuses the subtask editor from the Subtasks shortcut", async () => {
     renderApp(baseApi(Object.freeze([task({ id: "task-1", title: "Plan release" })])));
     await userEvent.click(await screen.findByRole("button", { name: "Plan release" }));
     const dialog = screen.getByRole("dialog", { name: "Task details: Plan release" });
+    const shortcutButtons = within(dialog.querySelector(".task-details-mobile-shortcuts") as HTMLElement).getAllByRole("button");
+    expect(shortcutButtons.slice(0, 3).map((button) => button.textContent?.trim())).toEqual(["Labels", "Date", "Subtasks"]);
+    expect(shortcutButtons.slice(0, 3).every((button) => button.querySelector("svg") !== null)).toBe(true);
     expect(dialog.querySelector(".task-subtasks-card")).toHaveClass("task-subtasks-hidden");
-    await userEvent.click(within(dialog).getByRole("button", { name: "Add subtasks" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Subtasks" }));
     expect(within(dialog).getByLabelText("New subtask title")).toHaveFocus();
     expect(dialog.querySelector(".task-subtasks-card")).toHaveClass("task-subtasks-open");
-    expect(within(dialog).queryByRole("button", { name: "Add subtasks" })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Subtasks" })).not.toBeInTheDocument();
     await userEvent.click(within(dialog).getByRole("button", { name: "Delete all subtasks and hide section" }));
-    expect(within(dialog).getByRole("button", { name: "Add subtasks" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Subtasks" })).toBeInTheDocument();
   });
 
   it("deletes existing subtasks when their mobile section is closed", async () => {
@@ -221,14 +224,14 @@ describe("TaskApp", () => {
     const dialog = screen.getByRole("dialog", { name: "Task details: Plan release" });
     await userEvent.click(within(dialog).getByRole("button", { name: "Delete all subtasks and hide section" }));
     await waitFor(() => expect(deleteTask).toHaveBeenCalledWith("child-1"));
-    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Add subtasks" })).toBeInTheDocument());
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Subtasks" })).toBeInTheDocument());
   });
 
   it("focuses the label input when Add labels reveals the editor", async () => {
     renderApp(baseApi(Object.freeze([task({ id: "task-1", title: "Plan release" })])));
     await userEvent.click(await screen.findByRole("button", { name: "Plan release" }));
     const dialog = screen.getByRole("dialog", { name: "Task details: Plan release" });
-    await userEvent.click(within(dialog).getByRole("button", { name: "Add labels" }));
+    await userEvent.click(within(dialog.querySelector(".task-details-mobile-shortcuts") as HTMLElement).getByRole("button", { name: "Labels" }));
     expect(within(dialog).getByLabelText("Labels")).toHaveFocus();
   });
 
@@ -236,7 +239,7 @@ describe("TaskApp", () => {
     renderApp(baseApi(Object.freeze([task({ id: "task-1", title: "Plan release" })])));
     await userEvent.click(await screen.findByRole("button", { name: "Plan release" }));
     const dialog = screen.getByRole("dialog", { name: "Task details: Plan release" });
-    await userEvent.click(within(dialog).getByRole("button", { name: "Add comments" }));
+    await userEvent.click(within(dialog.querySelector(".task-details-mobile-shortcuts") as HTMLElement).getByRole("button", { name: "Comments" }));
     expect(within(dialog).getByLabelText("Add comment")).toHaveFocus();
   });
 
@@ -260,15 +263,15 @@ describe("TaskApp", () => {
 
     await userEvent.click(within(dialog).getByRole("button", { name: "Remove all labels and hide section" }));
     await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", { labels: [] }));
-    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Add labels" })).toBeInTheDocument());
+    await waitFor(() => expect(within(dialog.querySelector(".task-details-mobile-shortcuts") as HTMLElement).getByRole("button", { name: "Labels" })).toBeInTheDocument());
 
     await userEvent.click(within(dialog).getByRole("button", { name: "Remove all comments and hide section" }));
     await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", { comments: [] }));
-    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Add comments" })).toBeInTheDocument());
+    await waitFor(() => expect(within(dialog.querySelector(".task-details-mobile-shortcuts") as HTMLElement).getByRole("button", { name: "Comments" })).toBeInTheDocument());
 
     await userEvent.click(within(dialog).getByRole("button", { name: "Remove date and hide section" }));
     await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", { dueDate: null }));
-    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Add date" })).toBeInTheDocument());
+    await waitFor(() => expect(within(dialog.querySelector(".task-details-mobile-shortcuts") as HTMLElement).getByRole("button", { name: "Date" })).toBeInTheDocument());
   });
 
   it("asks before removing saved labels, comments, and subtasks from mobile sections", async () => {

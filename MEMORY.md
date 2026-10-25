@@ -1,5 +1,22 @@
 # Project Memory
 
+## 2026-10-25 — Group task edit shortcuts in one row
+
+- Moved the mobile Subtasks shortcut into the task details shortcut row beside Labels and Date, with Comments following. All shortcuts use leading plus icons and wrap only when the row runs out of space.
+- Updated UI coverage for ordering, icons, and the subtask reveal interaction.
+- Verification: frontend tests pass (48), `pnpm build` and `git diff --check` pass.
+
+## 2026-10-25 — Keep Add task shortcuts on one row when they fit
+
+- Set the Description, Date, and Labels shortcut buttons to intrinsic width without flex growth. The row still wraps when the dialog is too narrow.
+- Verification: frontend tests pass (48), `pnpm build` and `git diff --check` pass.
+
+## 2026-10-25 — Simplify optional task field buttons
+
+- In Add task and task edit dialogs, optional field shortcuts now use concise labels (Description, Date, Labels, Comments) with a leading plus icon.
+- Updated mobile shortcut spacing and frontend assertions.
+- Verification: frontend tests pass (48), `pnpm build` and `git diff --check` pass.
+
 ## 2026-10-25 — Restrict the Tools page to administrators
 
 - The sidebar now shows the Tools link only when auth status identifies the current user as an administrator. Direct `/tools` navigation redirects non-administrators to the task page.
