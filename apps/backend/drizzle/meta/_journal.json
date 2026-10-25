@@ -43,6 +43,13 @@
       "when": 1792688437000,
       "tag": "0005_project_hierarchy",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792886400000,
+      "tag": "0006_users",
+      "breakpoints": true
     }
   ]
 }

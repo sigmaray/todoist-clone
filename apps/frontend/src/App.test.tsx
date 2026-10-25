@@ -54,11 +54,15 @@ const renderApp = (api: ApplicationApi) =>
 
 const baseApi = (tasks: ReadonlyArray<TaskNode>): ApplicationApi =>
   Object.freeze({
-    getSettings: async () => Object.freeze({ confirmDelete: true, accessMode: "anonymous" as const, username: null }),
-    updateSettings: async (settings) => Object.freeze({ confirmDelete: settings.confirmDelete, accessMode: settings.accessMode, username: settings.username }),
-    getAuthStatus: async () => Object.freeze({ accessMode: "anonymous" as const, authenticated: true }),
+    getSettings: async () => Object.freeze({ confirmDelete: true, accessMode: "password" as const, username: "admin" }),
+    updateSettings: async (settings) => Object.freeze({ confirmDelete: settings.confirmDelete, accessMode: "password" as const, username: "admin" }),
+    getAuthStatus: async () => Object.freeze({ accessMode: "password" as const, authenticated: true, user: Object.freeze({ id: "admin", username: "admin", isAdmin: true }) }),
     login: async () => undefined,
     logout: async () => undefined,
+    listUsers: async () => Object.freeze([Object.freeze({ id: "admin", username: "admin", isAdmin: true })]),
+    createUser: async (user) => Object.freeze({ id: "created-user", username: user.username, isAdmin: user.isAdmin }),
+    updateUser: async (id, user) => Object.freeze({ id, username: user.username ?? "admin", isAdmin: user.isAdmin ?? true }),
+    deleteUser: async () => undefined,
     listTasks: async () => tasks,
     listProjects: async () => Object.freeze([]),
     createProject: async (title) =>
@@ -377,7 +381,7 @@ describe("TaskApp", () => {
     expect(within(dialog).getByRole("button", { name: "Edit task description" })).toHaveTextContent("Ship release");
     await userEvent.click(within(dialog).getByRole("button", { name: "＋ Add date" }));
     fireEvent.change(screen.getByLabelText("New date"), { target: { value: "2026-11-01" } });
-    await userEvent.click(within(screen.getByRole("dialog", { name: "Change date" })).getByRole("button", { name: "Save date" }));
+    await userEvent.click(within(screen.getByRole("dialog", { name: "Add date" })).getByRole("button", { name: "Save date" }));
     await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", { dueDate: "2026-11-01" }));
     await userEvent.type(within(dialog).getByLabelText("Labels"), "work{Enter}");
     await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", { labels: ["work"] }));
@@ -896,7 +900,7 @@ describe("TaskApp", () => {
     const deleteTask = vi.fn(async () => undefined);
     const api = Object.freeze({
       ...baseApi(Object.freeze([task({ id: "1", title: "Plan MVP" })])),
-      getSettings: async () => Object.freeze({ confirmDelete: false, accessMode: "anonymous" as const, username: null }),
+      getSettings: async () => Object.freeze({ confirmDelete: false, accessMode: "password" as const, username: "admin" }),
       deleteTask
     });
 
@@ -1076,7 +1080,7 @@ describe("ToolsPage", () => {
 
     render(
       <QueryClientProvider client={createQueryClient()}>
-        <BrowserRouter><ToolsPage api={api} /></BrowserRouter>
+        <BrowserRouter><ToolsPage api={api} navigationApi={baseApi(Object.freeze([]))} /></BrowserRouter>
       </QueryClientProvider>
     );
 
@@ -1094,6 +1098,28 @@ describe("ToolsPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Run query" }));
 
     await waitFor(() => expect(runQuery).toHaveBeenCalledWith("SELECT 1;"));
+  });
+
+  it("hides the Tools navigation link from non-administrators", async () => {
+    const navigationApi = Object.freeze({
+      ...baseApi(Object.freeze([])),
+      getAuthStatus: async () => Object.freeze({ accessMode: "password" as const, authenticated: true, user: Object.freeze({ id: "member", username: "member", isAdmin: false }) })
+    });
+    const api: ToolsApi = Object.freeze({
+      listTables: async () => Object.freeze([]),
+      listRecords: async () => Object.freeze({}),
+      clearTable: async () => Object.freeze({}),
+      dropAllTables: async () => Object.freeze({}),
+      migrate: async () => Object.freeze({}),
+      clearAllTables: async () => Object.freeze({}),
+      seed: async () => Object.freeze({}),
+      runQuery: async () => Object.freeze({})
+    });
+
+    render(<QueryClientProvider client={createQueryClient()}><BrowserRouter><ToolsPage api={api} navigationApi={navigationApi} /></BrowserRouter></QueryClientProvider>);
+
+    expect(await screen.findByText("Database Tools")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Tools" })).not.toBeInTheDocument();
   });
 });
 
@@ -1174,9 +1200,9 @@ describe("SearchPalette", () => {
 });
 
 describe("SettingsPage", () => {
-  it("saves deletion and login settings", async () => {
+  it("saves the current user's deletion preference", async () => {
     const updateSettings = vi.fn(async (settings: Parameters<ApplicationApi["updateSettings"]>[0]) =>
-      Object.freeze({ confirmDelete: settings.confirmDelete, accessMode: settings.accessMode, username: settings.username })
+      Object.freeze({ confirmDelete: settings.confirmDelete, accessMode: "password" as const, username: "admin" })
     );
     const api = Object.freeze({ ...baseApi(Object.freeze([])), updateSettings });
 
@@ -1189,18 +1215,23 @@ describe("SettingsPage", () => {
     expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
     expect(await screen.findByRole("checkbox", { name: /Ask for confirmation/ })).toBeChecked();
     await userEvent.click(screen.getByRole("checkbox", { name: /Ask for confirmation/ }));
-    await userEvent.click(screen.getByRole("radio", { name: /Require login and password/ }));
-    await userEvent.type(screen.getByLabelText("Login"), "owner");
-    await userEvent.type(screen.getByLabelText("Password"), "a-long-test-password");
     await userEvent.click(screen.getByRole("button", { name: "Save settings" }));
 
     await waitFor(() => expect(updateSettings).toHaveBeenCalled());
-    expect(updateSettings.mock.calls[0]?.[0]).toEqual({
-        confirmDelete: false,
-        accessMode: "password",
-        username: "owner",
-        password: "a-long-test-password"
-    });
+    expect(updateSettings.mock.calls[0]?.[0]).toEqual({ confirmDelete: false });
+  });
+
+  it("lets administrators create a user", async () => {
+    const createUser = vi.fn(async (user: Parameters<ApplicationApi["createUser"]>[0]) => Object.freeze({ id: "created", username: user.username, isAdmin: user.isAdmin }));
+    const api = Object.freeze({ ...baseApi(Object.freeze([])), createUser });
+    render(<QueryClientProvider client={createQueryClient()}><BrowserRouter><SettingsPage api={api} /></BrowserRouter></QueryClientProvider>);
+
+    const usernames = await screen.findAllByLabelText("Username");
+    await userEvent.type(usernames[0]!, "sam");
+    await userEvent.type(screen.getByLabelText("Password"), "a-long-test-password");
+    await userEvent.click(screen.getByRole("button", { name: "Create user" }));
+
+    await waitFor(() => expect(createUser.mock.calls[0]?.[0]).toEqual({ username: "sam", password: "a-long-test-password", isAdmin: false }));
   });
 });
 

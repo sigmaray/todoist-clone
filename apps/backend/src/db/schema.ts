@@ -1,21 +1,23 @@
 import { boolean, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
-export const appSettings = pgTable("app_settings", {
-  id: text("id").primaryKey(),
-  confirmDelete: boolean("confirm_delete").notNull().default(true),
-  accessMode: text("access_mode").notNull().default("anonymous"),
-  username: text("username"),
-  passwordHash: text("password_hash"),
-  inboxDescription: text("inbox_description").notNull().default("")
-});
-
 export const sessions = pgTable("sessions", {
   tokenHash: text("token_hash").primaryKey(),
+  userId: text("user_id").notNull(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull()
+});
+
+export const users = pgTable("users", {
+  id: text("id").primaryKey(),
+  username: text("username").notNull().unique(),
+  passwordHash: text("password_hash"),
+  isAdmin: boolean("is_admin").notNull().default(false),
+  confirmDelete: boolean("confirm_delete").notNull().default(true),
+  inboxDescription: text("inbox_description").notNull().default("")
 });
 
 export const projects = pgTable("projects", {
   id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
   title: text("title").notNull(),
   description: text("description").notNull().default(""),
   archived: boolean("archived").notNull().default(false),
@@ -27,6 +29,7 @@ export const projects = pgTable("projects", {
 
 export const sections = pgTable("sections", {
   id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
   title: text("title").notNull(),
   projectId: text("project_id"),
   lexicalOrder: text("lexical_order").notNull(),
@@ -36,6 +39,7 @@ export const sections = pgTable("sections", {
 
 export const tasks = pgTable("tasks", {
   id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
   title: text("title").notNull(),
   description: text("description").notNull().default(""),
   dueDate: text("due_date"),

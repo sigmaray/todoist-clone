@@ -6,6 +6,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/server.ts",
+    "users": "tsx src/users-cli.ts",
     "test": "vitest run"
   },
   "dependencies": {

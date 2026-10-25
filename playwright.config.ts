@@ -3,11 +3,12 @@ import process from "node:process";
 
 const backendPort = process.env.E2E_BACKEND_PORT ?? "3100";
 const frontendPort = process.env.E2E_FRONTEND_PORT ?? "5174";
-const databaseUrl = process.env.E2E_DATABASE_URL ?? "postgres://todoist:todoist@127.0.0.1:5432/todoist_e2e";
+const databaseUrl = process.env.E2E_DATABASE_URL ?? process.env.DATABASE_URL ?? "postgres://todoist:todoist@127.0.0.1:5432/todoist_e2e";
 
 export default defineConfig({
   testDir: "./e2e",
   outputDir: process.env.PLAYWRIGHT_OUTPUT_DIR ?? "/tmp/todoist-clone-playwright-results",
+  workers: 1,
   use: {
     baseURL: `http://127.0.0.1:${frontendPort}`,
     trace: "on-first-retry"

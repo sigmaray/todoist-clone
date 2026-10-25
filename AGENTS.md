@@ -25,8 +25,8 @@ Self-hosted Todoist clone (MVP). A fast, hierarchical task manager with drag-and
   - E2E: Playwright.
 
 ## MVP Scope Constraints
-- **Do NOT implement:** Authentication/users, recurring tasks, smart date NLP parsing, tags, collaboration features, activity logs.
-- **DO implement:** Infinite nesting (Adjacency List `parentId`), task priorities (P1-P4), boolean completion status, drag-and-drop reordering.
+- **Do NOT implement:** Recurring tasks, smart date NLP parsing, tags, collaboration features, activity logs.
+- **DO implement:** User accounts with administrator-managed accounts and per-user task data, infinite nesting (Adjacency List `parentId`), task priorities (P1-P4), boolean completion status, drag-and-drop reordering.
 - **Sorting Mechanism:** Use Lexical Sorting (Fractional Indexing) for drag-and-drop to avoid mass database updates. Save as `lexicalOrder` string field.
 
 ## Code Style

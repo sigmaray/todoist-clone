@@ -54,8 +54,8 @@ test("edits task details and copies all Markdown", async ({ context, page }) => 
   await page.getByLabel("Edit task description").fill("Task details saved from the dialog");
   await page.getByRole("button", { name: "Save" }).click();
   await taskDialog.getByRole("button", { name: /Add date/ }).click();
-  await expect(page.getByRole("dialog", { name: "Change date" })).toBeVisible();
-  const dateDialog = page.getByRole("dialog", { name: "Change date" });
+  await expect(page.getByRole("dialog", { name: "Add date" })).toBeVisible();
+  const dateDialog = page.getByRole("dialog", { name: "Add date" });
   await expect(dateDialog.getByRole("button", { name: "Today" })).toBeVisible();
   await expect(dateDialog.getByRole("button", { name: "Tomorrow" })).toBeVisible();
   const todayCell = dateDialog.locator('[aria-current="date"]');

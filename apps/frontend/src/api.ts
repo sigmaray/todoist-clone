@@ -44,20 +44,20 @@ export type ToolsApi = Readonly<{
 
 export type AppSettings = Readonly<{
   confirmDelete: boolean;
-  accessMode: "anonymous" | "password";
-  username: string | null;
+  accessMode: "password";
+  username: string;
 }>;
+
+export type ManagedUser = Readonly<{ id: string; username: string; isAdmin: boolean }>;
 
 export type AuthStatus = Readonly<{
   accessMode: "anonymous" | "password";
   authenticated: boolean;
+  user: ManagedUser | null;
 }>;
 
 export type SettingsUpdate = Readonly<{
   confirmDelete: boolean;
-  accessMode: "anonymous" | "password";
-  username: string | null;
-  password?: string;
 }>;
 
 export type ApplicationApi = TaskApi & Readonly<{
@@ -66,6 +66,10 @@ export type ApplicationApi = TaskApi & Readonly<{
   getAuthStatus: () => Promise<AuthStatus>;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  listUsers: () => Promise<ReadonlyArray<ManagedUser>>;
+  createUser: (user: Readonly<{ username: string; password: string; isAdmin: boolean }>) => Promise<ManagedUser>;
+  updateUser: (id: string, user: Readonly<{ username?: string; password?: string; isAdmin?: boolean }>) => Promise<ManagedUser>;
+  deleteUser: (id: string) => Promise<void>;
 }>;
 
 const readJson = async <T>(response: Response): Promise<T> => {
@@ -99,6 +103,10 @@ export const createTaskApi = (baseUrl = ""): ApplicationApi =>
     logout: async () => {
       await postJson(`${baseUrl}/auth/logout`);
     },
+    listUsers: async () => (await readJson<{ users: ReadonlyArray<ManagedUser> }>(await fetch(`${baseUrl}/users`))).users,
+    createUser: async (user) => (await postJson<{ user: ManagedUser }>(`${baseUrl}/users`, user)).user,
+    updateUser: async (id, user) => (await readJson<{ user: ManagedUser }>(await fetch(`${baseUrl}/users/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(user) }))).user,
+    deleteUser: async (id) => { await readJson<{ deleted: true }>(await fetch(`${baseUrl}/users/${id}`, { method: "DELETE" })); },
     listTasks: async () => {
       const data = await readJson<{ tree: ReadonlyArray<TaskNode> }>(await fetch(`${baseUrl}/tasks`));
 

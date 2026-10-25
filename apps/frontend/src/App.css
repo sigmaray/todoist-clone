@@ -1490,6 +1490,78 @@ body {
   margin: -4px 0 0 26px;
 }
 
+.user-management {
+  margin-top: 22px;
+}
+
+.user-management h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.user-management > .settings-credentials {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  align-items: end;
+}
+
+.user-management .settings-checkbox {
+  align-items: center;
+}
+
+.user-management .settings-checkbox input {
+  margin-top: 0;
+}
+
+.managed-users {
+  display: grid;
+  gap: 10px;
+}
+
+.managed-user {
+  display: grid;
+  grid-template-columns: minmax(130px, 1fr) minmax(150px, 1fr) auto auto auto;
+  align-items: end;
+  gap: 10px;
+  border: 1px solid #eeeae7;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.managed-user > label:not(.settings-checkbox) {
+  display: grid;
+  gap: 6px;
+}
+
+.managed-user input:not([type="checkbox"]) {
+  width: 100%;
+  min-height: 38px;
+  box-sizing: border-box;
+  border: 1px solid #ddd9d5;
+  border-radius: 6px;
+  padding: 7px 9px;
+  font: inherit;
+}
+
+.managed-user button {
+  min-height: 38px;
+  border: 1px solid #ddd9d5;
+  border-radius: 6px;
+  background: #fff;
+  padding: 7px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.managed-user button.danger {
+  color: #b42318;
+}
+
+@media (max-width: 700px) {
+  .managed-user {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
 .settings-credentials,
 .auth-form {
   display: grid;

@@ -83,3 +83,41 @@ tasks:
     cmds:
       - test -f "{{.DUMP_FILE}}"
       - docker compose --env-file .env.example -f docker-compose.dev.yml exec -T postgres pg_restore -U "{{.DB_USER}}" -d "{{.DB_NAME}}" --clean --if-exists --no-owner --no-privileges --exit-on-error < "{{.DUMP_FILE}}"
+
+  dev:docker:users:list:
+    desc: List user accounts in the development database
+    dir: apps/backend
+    cmds:
+      - DATABASE_URL="{{.DATABASE_URL}}" pnpm users list
+
+  dev:docker:users:create:
+    desc: Create a user account (USERNAME=... PASSWORD=... [ADMIN=true])
+    vars:
+      USERNAME: '{{.USERNAME | default ""}}'
+      PASSWORD: '{{.PASSWORD | default ""}}'
+      ADMIN: '{{.ADMIN | default "false"}}'
+    dir: apps/backend
+    cmds:
+      - test -n "{{.USERNAME}}" && test -n "{{.PASSWORD}}"
+      - DATABASE_URL="{{.DATABASE_URL}}" pnpm users create "{{.USERNAME}}" "{{.PASSWORD}}" {{if eq .ADMIN "true"}}--admin{{end}}
+
+  dev:docker:users:update:
+    desc: Update an account (USERNAME=... [NAME=...] [PASSWORD=...] [ADMIN=true|false])
+    vars:
+      USERNAME: '{{.USERNAME | default ""}}'
+      NAME: '{{.NAME | default ""}}'
+      PASSWORD: '{{.PASSWORD | default ""}}'
+      ADMIN: '{{.ADMIN | default ""}}'
+    dir: apps/backend
+    cmds:
+      - test -n "{{.USERNAME}}"
+      - DATABASE_URL="{{.DATABASE_URL}}" pnpm users update "{{.USERNAME}}" {{if .NAME}}--name="{{.NAME}}"{{end}} {{if .PASSWORD}}--password="{{.PASSWORD}}"{{end}} {{if .ADMIN}}--admin={{.ADMIN}}{{end}}
+
+  dev:docker:users:delete:
+    desc: Delete a user account (USERNAME=...)
+    vars:
+      USERNAME: '{{.USERNAME | default ""}}'
+    dir: apps/backend
+    cmds:
+      - test -n "{{.USERNAME}}"
+      - DATABASE_URL="{{.DATABASE_URL}}" pnpm users delete "{{.USERNAME}}"

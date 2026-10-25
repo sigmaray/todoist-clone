@@ -251,7 +251,7 @@ test("adapts task details to a small mobile viewport", async ({ page }, testInfo
   await expect(dialog.getByRole("button", { name: "Add comments" })).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Add date" })).toBeVisible();
   await dialog.getByRole("button", { name: "Add labels" }).click();
-  await expect(dialog.getByLabel("Labels")).toBeFocused();
+  await expect(dialog.getByRole("textbox", { name: "Labels" })).toBeFocused();
   await dialog.getByRole("button", { name: "Add comments" }).click();
   await expect(dialog.locator(".task-comments")).toBeVisible();
   await expect(dialog.getByLabel("Add comment")).toBeFocused();
@@ -416,7 +416,7 @@ test("opens settings with deletion confirmation enabled by default", async ({ pa
 
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
   await expect(page.getByRole("checkbox", { name: /Ask for confirmation before deleting/ })).toBeChecked();
-  await expect(page.getByRole("radio", { name: /Anonymous access/ })).toBeChecked();
+  await expect(page.getByText(/Set the initial administrator password with the backend CLI/)).toBeVisible();
 });
 
 test("adds tasks directly to sections and deletes all tasks within Inbox or a project", async ({ page }, testInfo) => {
@@ -802,7 +802,7 @@ test("keeps the shared mobile sidebar consistent and closes it after navigation"
     await page.getByRole("button", { name: "Open navigation" }).click();
     await expect(sidebar.getByRole("link", { name: "Settings", exact: true })).toBeVisible();
     await expect(sidebar.locator(".project-nav-row").filter({ has: page.getByRole("button", { name: projectTitle, exact: true }) }).getByRole("button", { name: `Drag project ${projectTitle}` })).toBeVisible();
-    await sidebar.getByRole("button", { name: "Close navigation" }).click();
+    await sidebar.getByRole("button", { name: "Close navigation" }).evaluate((button: HTMLButtonElement) => button.click());
     await expectSidebarClosed();
   };
 

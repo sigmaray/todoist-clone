@@ -3,8 +3,9 @@ import { createServer } from "node:http";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createApp } from "./app";
-import { createMemorySettingsRepository } from "./settings";
+import { hashPassword } from "./auth";
 import { createMemoryTaskRepository } from "./repository";
+import { createMemoryUserRepository } from "./users";
 
 const createTestServer = () => createServer(getRequestListener(createApp().fetch));
 
@@ -272,40 +273,41 @@ describe("PATCH /sections/:id/order", () => {
 
 describe("settings and session authentication", () => {
   it("defaults to delete confirmations and allows updating that preference", async () => {
-    const settingsRepository = createMemorySettingsRepository();
-    const server = createServer(getRequestListener(createApp(createMemoryTaskRepository(), { settingsRepository }).fetch));
+    const passwordHash = await hashPassword("a-long-test-password");
+    const userRepository = createMemoryUserRepository([Object.freeze({ id: "legacy-admin", username: "admin", passwordHash, isAdmin: true, confirmDelete: true, inboxDescription: "" })]);
+    const server = createServer(getRequestListener(createApp(createMemoryTaskRepository(), { userRepository }).fetch));
     const agent = request.agent(server);
 
+    await agent.post("/auth/login").send({ username: "admin", password: "a-long-test-password" }).expect(200);
     await agent.get("/settings").expect(200).expect(({ body }) => {
-      expect(body.settings).toEqual({ confirmDelete: true, accessMode: "anonymous", username: null });
+      expect(body.settings).toEqual({ confirmDelete: true, accessMode: "password", username: "admin" });
     });
-    await agent.put("/settings").send({ confirmDelete: false, accessMode: "anonymous", username: null }).expect(200);
+    await agent.put("/settings").send({ confirmDelete: false }).expect(200);
     await agent.get("/settings").expect(200).expect(({ body }) => expect(body.settings.confirmDelete).toBe(false));
   });
 
   it("persists the Inbox description", async () => {
-    const settingsRepository = createMemorySettingsRepository();
-    const server = createServer(getRequestListener(createApp(createMemoryTaskRepository(), { settingsRepository }).fetch));
+    const passwordHash = await hashPassword("a-long-test-password");
+    const userRepository = createMemoryUserRepository([Object.freeze({ id: "legacy-admin", username: "admin", passwordHash, isAdmin: true, confirmDelete: true, inboxDescription: "" })]);
+    const server = createServer(getRequestListener(createApp(createMemoryTaskRepository(), { userRepository }).fetch));
     const agent = request.agent(server);
 
+    await agent.post("/auth/login").send({ username: "admin", password: "a-long-test-password" }).expect(200);
     await agent.get("/inbox/description").expect(200).expect(({ body }) => expect(body.description).toBe(""));
     await agent.put("/inbox/description").send({ description: "Inbox notes" }).expect(200);
     await agent.get("/inbox/description").expect(200).expect(({ body }) => expect(body.description).toBe("Inbox notes"));
   });
 
-  it("protects app routes with an HttpOnly session cookie when password access is enabled", async () => {
-    const settingsRepository = createMemorySettingsRepository();
-    const server = createServer(getRequestListener(createApp(createMemoryTaskRepository(), { settingsRepository }).fetch));
+  it("protects app routes with a user-specific HttpOnly session cookie", async () => {
+    const passwordHash = await hashPassword("a-long-test-password");
+    const userRepository = createMemoryUserRepository([Object.freeze({ id: "legacy-admin", username: "admin", passwordHash, isAdmin: true, confirmDelete: true, inboxDescription: "" })]);
+    const server = createServer(getRequestListener(createApp(createMemoryTaskRepository(), { userRepository }).fetch));
     const agent = request.agent(server);
 
-    await agent
-      .put("/settings")
-      .send({ confirmDelete: true, accessMode: "password", username: "owner", password: "a-long-test-password" })
-      .expect(200);
     await agent.get("/tasks").expect(401);
-    await agent.post("/auth/login").send({ username: "owner", password: "wrong-password" }).expect(401);
+    await agent.post("/auth/login").send({ username: "admin", password: "wrong-password" }).expect(401);
 
-    const login = await agent.post("/auth/login").send({ username: "owner", password: "a-long-test-password" }).expect(200);
+    const login = await agent.post("/auth/login").send({ username: "admin", password: "a-long-test-password" }).expect(200);
     expect(login.headers["set-cookie"][0]).toMatch(/HttpOnly/);
     expect(login.headers["set-cookie"][0]).toMatch(/SameSite=Lax/i);
     await agent.get("/tasks").expect(200);
@@ -314,13 +316,43 @@ describe("settings and session authentication", () => {
     await agent.get("/tasks").expect(401);
   });
 
-  it("requires a sufficiently long password before enabling login", async () => {
-    const settingsRepository = createMemorySettingsRepository();
-    const server = createServer(getRequestListener(createApp(createMemoryTaskRepository(), { settingsRepository }).fetch));
+  it("allows only administrators to manage accounts and preserves an administrator", async () => {
+    const passwordHash = await hashPassword("a-long-test-password");
+    const userRepository = createMemoryUserRepository([Object.freeze({ id: "legacy-admin", username: "admin", passwordHash, isAdmin: true, confirmDelete: true, inboxDescription: "" })]);
+    const server = createServer(getRequestListener(createApp(createMemoryTaskRepository(), { userRepository }).fetch));
+    const agent = request.agent(server);
+    await agent.post("/auth/login").send({ username: "admin", password: "a-long-test-password" }).expect(200);
+    const created = await agent.post("/users").send({ username: "sam", password: "another-long-test-pass", isAdmin: false }).expect(201);
+    const userId = created.body.user.id as string;
+    await agent.patch(`/users/${userId}`).send({ isAdmin: true }).expect(200);
+    await agent.patch(`/users/${userId}`).send({ isAdmin: false }).expect(200);
+    await agent.delete(`/users/${userId}`).expect(200);
+    await agent.delete("/users/legacy-admin").expect(409);
+  });
 
-    await request(server)
-      .put("/settings")
-      .send({ confirmDelete: true, accessMode: "password", username: "owner", password: "short" })
-      .expect(400);
+  it("keeps task data isolated by user", async () => {
+    const passwordHash = await hashPassword("a-long-test-password");
+    const userRepository = createMemoryUserRepository([Object.freeze({ id: "legacy-admin", username: "admin", passwordHash, isAdmin: true, confirmDelete: true, inboxDescription: "" })]);
+    let repositories = Object.freeze({} as Readonly<Record<string, ReturnType<typeof createMemoryTaskRepository>>>);
+    const repositoryFor = (userId: string) => {
+      const existing = repositories[userId];
+      if (existing !== undefined) return existing;
+      const created = createMemoryTaskRepository();
+      repositories = Object.freeze({ ...repositories, [userId]: created });
+      return created;
+    };
+    const server = createServer(getRequestListener(createApp(repositoryFor, { userRepository }).fetch));
+    const admin = request.agent(server);
+    await admin.post("/auth/login").send({ username: "admin", password: "a-long-test-password" }).expect(200);
+    const createdUser = await admin.post("/users").send({ username: "sam", password: "another-long-test-pass" }).expect(201);
+    const sam = request.agent(server);
+    await sam.post("/auth/login").send({ username: "sam", password: "another-long-test-pass" }).expect(200);
+
+    await admin.post("/tasks").send({ title: "Admin task" }).expect(201);
+    await sam.post("/tasks").send({ title: "Sam task" }).expect(201);
+    await admin.get("/tasks").expect(200).expect(({ body }) => expect(body.tasks.map((task: { title: string }) => task.title)).toEqual(["Admin task"]));
+    await sam.get("/tasks").expect(200).expect(({ body }) => expect(body.tasks.map((task: { title: string }) => task.title)).toEqual(["Sam task"]));
+    await sam.get("/users").expect(403);
+    expect(createdUser.body.user.isAdmin).toBe(false);
   });
 });

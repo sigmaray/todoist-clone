@@ -27,9 +27,10 @@ const migrationFiles = Object.freeze([
   new URL("../drizzle/0002_task_details_archives.sql", import.meta.url),
   new URL("../drizzle/0003_remove_task_priorities.sql", import.meta.url),
   new URL("../drizzle/0004_scope_descriptions.sql", import.meta.url),
-  new URL("../drizzle/0005_project_hierarchy.sql", import.meta.url)
+  new URL("../drizzle/0005_project_hierarchy.sql", import.meta.url),
+  new URL("../drizzle/0006_users.sql", import.meta.url)
 ]);
-const protectedTables = Object.freeze(["app_settings", "sessions"]);
+const protectedTables = Object.freeze(["sessions", "users"]);
 
 const seedTasks = Object.freeze([
   Object.freeze({
@@ -91,7 +92,7 @@ const dropAllTables = async (sql: postgres.Sql) => {
       FOR item IN (
         SELECT tablename FROM pg_tables
         WHERE schemaname = current_schema()
-          AND tablename NOT IN ('app_settings', 'sessions')
+          AND tablename NOT IN ('sessions', 'users')
       ) LOOP
         EXECUTE format('DROP TABLE IF EXISTS %I CASCADE', item.tablename);
       END LOOP;
@@ -110,10 +111,11 @@ const seed = async (sql: postgres.Sql) => {
   await Promise.all(
     seedTasks.map((task) =>
       sql`
-        INSERT INTO tasks (id, title, completed, parent_id, lexical_order)
-        VALUES (${task.id}, ${task.title}, false, ${task.parentId}, ${task.lexicalOrder})
+        INSERT INTO tasks (id, user_id, title, completed, parent_id, lexical_order)
+        VALUES (${task.id}, 'legacy-admin', ${task.title}, false, ${task.parentId}, ${task.lexicalOrder})
         ON CONFLICT (id) DO UPDATE SET
           title = EXCLUDED.title,
+          user_id = EXCLUDED.user_id,
           completed = EXCLUDED.completed,
           parent_id = EXCLUDED.parent_id,
           lexical_order = EXCLUDED.lexical_order,

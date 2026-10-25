@@ -6,8 +6,8 @@ import { z } from "zod";
 import { createSessionToken, hashPassword, hashSessionToken, sessionCookieName, sessionLifetimeSeconds, verifyPassword } from "./auth";
 import { createMemoryTaskRepository } from "./repository";
 import type { TaskRepository } from "./repository";
-import { createMemorySettingsRepository, toPublicSettings } from "./settings";
-import type { SettingsRepository } from "./settings";
+import { createMemoryUserRepository } from "./users";
+import type { UserRepository } from "./users";
 import { createToolsRouter } from "./tools";
 
 const createTaskSchema = z.object({
@@ -65,11 +65,10 @@ const loginSchema = z.object({
 });
 
 const updateSettingsSchema = z.object({
-  confirmDelete: z.boolean(),
-  accessMode: z.enum(["anonymous", "password"]),
-  username: z.string().trim().min(1).max(64).nullable().optional(),
-  password: z.string().min(12).max(128).optional()
+  confirmDelete: z.boolean()
 });
+const createUserSchema = z.object({ username: z.string().trim().min(1).max(64), password: z.string().min(12).max(128), isAdmin: z.boolean().default(false) });
+const updateUserSchema = z.object({ username: z.string().trim().min(1).max(64).optional(), password: z.string().min(12).max(128).optional(), isAdmin: z.boolean().optional() }).refine((patch) => Object.keys(patch).length > 0);
 const inboxDescriptionSchema = z.object({ description: z.string().max(20000) });
 
 const parseJson = async (request: Request) => {
@@ -83,12 +82,17 @@ const parseJson = async (request: Request) => {
 };
 
 export const createApp = (
-  repository: TaskRepository = createMemoryTaskRepository(),
-  options: Readonly<{ databaseUrl?: string; mode?: string; settingsRepository?: SettingsRepository }> = Object.freeze({})
+  repository: TaskRepository | ((userId: string) => TaskRepository) = createMemoryTaskRepository(),
+  options: Readonly<{ databaseUrl?: string; mode?: string; userRepository?: UserRepository }> = Object.freeze({})
 ) => {
-  const app = new Hono();
-  const settingsRepository = options.settingsRepository ?? createMemorySettingsRepository();
+  const app = new Hono<{ Variables: { userId: string; authenticated: boolean } }>();
+  const userRepository = options.userRepository ?? createMemoryUserRepository();
   const secureCookies = options.mode === "production";
+  const repositoryFor = (userId: string) => typeof repository === "function" ? repository(userId) : repository;
+  const requireAdmin = async (userId: string) => {
+    const user = await userRepository.getById(userId);
+    return user?.isAdmin === true;
+  };
 
   app.use("*", cors());
 
@@ -102,43 +106,45 @@ export const createApp = (
       return;
     }
 
-    const settings = await settingsRepository.getSettings();
-
-    if (settings.accessMode === "anonymous") {
+    if (!(await userRepository.hasPasswordUsers())) {
+      context.set("userId", "legacy-admin");
+      context.set("authenticated", false);
       await next();
       return;
     }
 
     const token = getCookie(context, sessionCookieName);
-    const valid = token === undefined ? false : await settingsRepository.hasSession(hashSessionToken(token), new Date());
+    const userId = token === undefined ? null : await userRepository.getSessionUserId(hashSessionToken(token), new Date());
 
-    if (!valid) {
+    if (userId === null || await userRepository.getById(userId) === null) {
       return context.json({ error: "Authentication required" }, 401);
     }
 
+    context.set("userId", userId);
+    context.set("authenticated", true);
     await next();
   });
 
   app.get("/auth/status", async (context) => {
-    const settings = await settingsRepository.getSettings();
     const token = getCookie(context, sessionCookieName);
-    const authenticated = settings.accessMode === "anonymous" || (token !== undefined && (await settingsRepository.hasSession(hashSessionToken(token), new Date())));
+    const requiresLogin = await userRepository.hasPasswordUsers();
+    const userId = token === undefined ? null : await userRepository.getSessionUserId(hashSessionToken(token), new Date());
+    const activeUser = userId === null ? null : await userRepository.getById(userId);
+    const effectiveUser = activeUser ?? (requiresLogin ? null : await userRepository.getById("legacy-admin"));
+    const authenticated = activeUser !== null;
 
     context.header("Cache-Control", "no-store");
-    return context.json({ accessMode: settings.accessMode, authenticated });
+    return context.json({ accessMode: requiresLogin ? "password" : "anonymous", authenticated, user: effectiveUser === null ? null : { id: effectiveUser.id, username: effectiveUser.username, isAdmin: effectiveUser.isAdmin } });
   });
 
   app.post("/auth/login", async (context) => {
     const result = loginSchema.safeParse(await parseJson(context.req.raw));
-    const settings = await settingsRepository.getSettings();
-
-    if (!result.success || settings.accessMode !== "password" || settings.username === null || settings.passwordHash === null) {
+    if (!result.success) {
       return context.json({ error: "Invalid username or password" }, 401);
     }
 
-    const validPassword = await verifyPassword(result.data.password, settings.passwordHash);
-
-    if (result.data.username !== settings.username || !validPassword) {
+    const user = await userRepository.getByUsername(result.data.username.trim().toLowerCase());
+    if (user === null || user.passwordHash === null || !(await verifyPassword(result.data.password, user.passwordHash))) {
       return context.json({ error: "Invalid username or password" }, 401);
     }
 
@@ -146,7 +152,7 @@ export const createApp = (
     const tokenHash = hashSessionToken(token);
     const expiresAt = new Date(Date.now() + sessionLifetimeSeconds * 1000);
 
-    await settingsRepository.saveSession(tokenHash, expiresAt);
+    await userRepository.saveSession(tokenHash, user.id, expiresAt);
     setCookie(context, sessionCookieName, token, {
       httpOnly: true,
       secure: secureCookies,
@@ -163,7 +169,7 @@ export const createApp = (
     const token = getCookie(context, sessionCookieName);
 
     if (token !== undefined) {
-      await settingsRepository.deleteSession(hashSessionToken(token));
+      await userRepository.deleteSession(hashSessionToken(token));
     }
 
     deleteCookie(context, sessionCookieName, { httpOnly: true, secure: secureCookies, sameSite: "Lax", path: "/" });
@@ -171,8 +177,10 @@ export const createApp = (
   });
 
   app.get("/settings", async (context) => {
+    const user = await userRepository.getById(context.get("userId"));
+    if (user === null) return context.json({ error: "User not found" }, 404);
     context.header("Cache-Control", "no-store");
-    return context.json({ settings: toPublicSettings(await settingsRepository.getSettings()) });
+    return context.json({ settings: { confirmDelete: user.confirmDelete, accessMode: "password", username: user.username }, currentUser: { id: user.id, username: user.username, isAdmin: user.isAdmin } });
   });
 
   app.put("/settings", async (context) => {
@@ -182,52 +190,88 @@ export const createApp = (
       return context.json({ error: "Invalid settings" }, 400);
     }
 
-    const current = await settingsRepository.getSettings();
-    const username = result.data.username === undefined ? current.username : result.data.username;
-    const passwordHash = result.data.password === undefined ? current.passwordHash : await hashPassword(result.data.password);
-
-    if (result.data.accessMode === "password" && (username === null || passwordHash === null)) {
-      return context.json({ error: "Set a username and a password before enabling login" }, 400);
-    }
-
-    const settings = Object.freeze({
-      confirmDelete: result.data.confirmDelete,
-      accessMode: result.data.accessMode,
-      username,
-      passwordHash
-    });
-    const credentialsChanged = username !== current.username || passwordHash !== current.passwordHash;
-
-    await settingsRepository.saveSettings(settings);
-
-    if (settings.accessMode === "anonymous" || credentialsChanged) {
-      await settingsRepository.deleteAllSessions();
-    }
-
+    const userId = context.get("userId");
+    const user = await userRepository.getById(userId);
+    if (user === null) return context.json({ error: "User not found" }, 404);
+    await userRepository.savePreferences(userId, result.data.confirmDelete);
     context.header("Cache-Control", "no-store");
-    return context.json({ settings: toPublicSettings(settings) });
+    return context.json({ settings: { confirmDelete: result.data.confirmDelete, accessMode: "password", username: user.username } });
   });
 
-  app.get("/inbox/description", async (context) => context.json({ description: await settingsRepository.getInboxDescription() }));
+  app.get("/users", async (context) => {
+    if (!context.get("authenticated") || !(await requireAdmin(context.get("userId")))) return context.json({ error: "Administrator access required" }, 403);
+    return context.json({ users: await userRepository.list() });
+  });
+  app.post("/users", async (context) => {
+    const administrator = await userRepository.getById(context.get("userId"));
+    if (!context.get("authenticated") || administrator?.isAdmin !== true) return context.json({ error: "Administrator access required" }, 403);
+    if (administrator.passwordHash === null) return context.json({ error: "Set a password for this administrator before creating users" }, 409);
+    const result = createUserSchema.safeParse(await parseJson(context.req.raw));
+    if (!result.success) return context.json({ error: "Invalid user payload" }, 400);
+    try {
+      const user = await userRepository.create(result.data.username.toLowerCase(), await hashPassword(result.data.password), result.data.isAdmin);
+      return context.json({ user }, 201);
+    } catch {
+      return context.json({ error: "Username already exists" }, 409);
+    }
+  });
+  app.patch("/users/:id", async (context) => {
+    if (!context.get("authenticated") || !(await requireAdmin(context.get("userId")))) return context.json({ error: "Administrator access required" }, 403);
+    const result = updateUserSchema.safeParse(await parseJson(context.req.raw));
+    if (!result.success) return context.json({ error: "Invalid user payload" }, 400);
+    const userId = context.req.param("id");
+    const target = await userRepository.getById(userId);
+    if (target === null) return context.json({ error: "User not found" }, 404);
+    if (target.isAdmin && result.data.isAdmin === false && (await userRepository.list()).filter((user) => user.isAdmin).length < 2) return context.json({ error: "At least one administrator is required" }, 409);
+    try {
+      const updated = await userRepository.update(userId, {
+        ...(result.data.username === undefined ? {} : { username: result.data.username.toLowerCase() }),
+        ...(result.data.password === undefined ? {} : { passwordHash: await hashPassword(result.data.password) }),
+        ...(result.data.isAdmin === undefined ? {} : { isAdmin: result.data.isAdmin })
+      });
+      return updated === null ? context.json({ error: "Username already exists" }, 409) : context.json({ user: updated });
+    } catch {
+      return context.json({ error: "Username already exists" }, 409);
+    }
+  });
+  app.delete("/users/:id", async (context) => {
+    if (!context.get("authenticated") || !(await requireAdmin(context.get("userId")))) return context.json({ error: "Administrator access required" }, 403);
+    const userId = context.req.param("id");
+    const target = await userRepository.getById(userId);
+    if (target === null) return context.json({ error: "User not found" }, 404);
+    if (target.isAdmin && (await userRepository.list()).filter((user) => user.isAdmin).length < 2) return context.json({ error: "At least one administrator is required" }, 409);
+    await userRepository.delete(userId);
+    return context.json({ deleted: true });
+  });
+
+  app.get("/inbox/description", async (context) => context.json({ description: (await userRepository.getById(context.get("userId")))?.inboxDescription ?? "" }));
   app.put("/inbox/description", async (context) => {
     const result = inboxDescriptionSchema.safeParse(await parseJson(context.req.raw));
     if (!result.success) return context.json({ error: "Invalid Inbox description" }, 400);
-    await settingsRepository.saveInboxDescription(result.data.description);
+    const user = await userRepository.getById(context.get("userId"));
+    if (user === null) return context.json({ error: "User not found" }, 404);
+    await userRepository.savePreferences(user.id, user.confirmDelete, result.data.description);
     return context.json({ description: result.data.description });
   });
 
   if (options.databaseUrl !== undefined) {
+    app.use("/tools-api/*", async (context, next) => {
+      const administrator = await requireAdmin(context.get("userId"));
+      const bootstrapAdmin = !context.get("authenticated") && !(await userRepository.hasPasswordUsers()) && context.get("userId") === "legacy-admin";
+      if ((!context.get("authenticated") && !bootstrapAdmin) || !administrator) return context.json({ error: "Administrator access required" }, 403);
+      await next();
+    });
     app.route("/tools-api", createToolsRouter(options.databaseUrl, options.mode ?? "development"));
   }
 
   app.get("/tasks", async (context) => {
-    const tasks = await repository.list();
+    const tasks = await repositoryFor(context.get("userId")).list();
 
     return context.json({ tasks, tree: buildTaskTree(tasks) });
   });
 
   app.get("/projects", async (context) => {
-    const projects = await repository.listProjects();
+    const projects = await repositoryFor(context.get("userId")).listProjects();
 
     return context.json({ projects });
   });
@@ -239,8 +283,8 @@ export const createApp = (
       return context.json({ error: "Invalid project payload" }, 400);
     }
 
-    if (result.data.parentId !== null && !(await repository.listProjects()).some((project) => project.id === result.data.parentId)) return context.json({ error: "Parent project not found" }, 404);
-    const project = result.data.parentId === null ? await repository.createProject(result.data.title) : await repository.createSubproject(result.data.title, result.data.parentId);
+    if (result.data.parentId !== null && !(await repositoryFor(context.get("userId")).listProjects()).some((project) => project.id === result.data.parentId)) return context.json({ error: "Parent project not found" }, 404);
+    const project = result.data.parentId === null ? await repositoryFor(context.get("userId")).createProject(result.data.title) : await repositoryFor(context.get("userId")).createSubproject(result.data.title, result.data.parentId);
 
     return context.json({ project }, 201);
   });
@@ -248,8 +292,8 @@ export const createApp = (
   app.patch("/projects/:id/parent", async (context) => {
     const result = moveProjectSchema.safeParse(await parseJson(context.req.raw));
     if (!result.success) return context.json({ error: "Invalid project parent" }, 400);
-    if (result.data.parentId !== null && !(await repository.listProjects()).some((project) => project.id === result.data.parentId)) return context.json({ error: "Parent project not found" }, 404);
-    const project = await repository.moveProject(context.req.param("id"), result.data.parentId);
+    if (result.data.parentId !== null && !(await repositoryFor(context.get("userId")).listProjects()).some((project) => project.id === result.data.parentId)) return context.json({ error: "Parent project not found" }, 404);
+    const project = await repositoryFor(context.get("userId")).moveProject(context.req.param("id"), result.data.parentId);
     return project === null ? context.json({ error: "Project not found or invalid parent" }, 404) : context.json({ project });
   });
 
@@ -260,7 +304,7 @@ export const createApp = (
       return context.json({ error: "Invalid project patch" }, 400);
     }
 
-    const project = await repository.updateProject(context.req.param("id"), result.data);
+    const project = await repositoryFor(context.get("userId")).updateProject(context.req.param("id"), result.data);
 
     return project === null ? context.json({ error: "Project not found" }, 404) : context.json({ project });
   });
@@ -268,30 +312,30 @@ export const createApp = (
   app.patch("/projects/:id/order", async (context) => {
     const result = reorderProjectSchema.safeParse(await parseJson(context.req.raw));
     if (!result.success) return context.json({ error: "Invalid project order" }, 400);
-    const project = await repository.reorderProject(context.req.param("id"), result.data.beforeId, result.data.afterId);
+    const project = await repositoryFor(context.get("userId")).reorderProject(context.req.param("id"), result.data.beforeId, result.data.afterId);
     return project === null ? context.json({ error: "Project not found" }, 404) : context.json({ project });
   });
 
   app.post("/projects/:id/duplicate", async (context) => {
-    const project = await repository.duplicateProject(context.req.param("id"));
+    const project = await repositoryFor(context.get("userId")).duplicateProject(context.req.param("id"));
     return project === null ? context.json({ error: "Project not found" }, 404) : context.json({ project }, 201);
   });
 
   app.patch("/projects/:id/archive", async (context) => {
     const result = z.object({ archived: z.boolean() }).safeParse(await parseJson(context.req.raw));
     if (!result.success) return context.json({ error: "Invalid archive state" }, 400);
-    const project = await repository.setProjectArchived(context.req.param("id"), result.data.archived);
+    const project = await repositoryFor(context.get("userId")).setProjectArchived(context.req.param("id"), result.data.archived);
     return project === null ? context.json({ error: "Project not found" }, 404) : context.json({ project });
   });
 
   app.delete("/projects/:id", async (context) => {
-    const deleted = await repository.deleteProject(context.req.param("id"));
+    const deleted = await repositoryFor(context.get("userId")).deleteProject(context.req.param("id"));
 
     return deleted ? context.json({ deleted: true }) : context.json({ error: "Project not found" }, 404);
   });
 
   app.get("/sections", async (context) => {
-    const sections = await repository.listSections();
+    const sections = await repositoryFor(context.get("userId")).listSections();
 
     return context.json({ sections });
   });
@@ -303,7 +347,9 @@ export const createApp = (
       return context.json({ error: "Invalid section payload" }, 400);
     }
 
-    const section = await repository.createSection(result.data.title, result.data.projectId);
+    if (result.data.projectId !== null && !(await repositoryFor(context.get("userId")).listProjects()).some((project) => project.id === result.data.projectId)) return context.json({ error: "Project not found" }, 404);
+
+    const section = await repositoryFor(context.get("userId")).createSection(result.data.title, result.data.projectId);
 
     return context.json({ section }, 201);
   });
@@ -311,7 +357,7 @@ export const createApp = (
   app.patch("/sections/:id/order", async (context) => {
     const result = reorderSectionSchema.safeParse(await parseJson(context.req.raw));
     if (!result.success) return context.json({ error: "Invalid section order" }, 400);
-    const section = await repository.reorderSection(context.req.param("id"), result.data.beforeId, result.data.afterId);
+    const section = await repositoryFor(context.get("userId")).reorderSection(context.req.param("id"), result.data.beforeId, result.data.afterId);
     return section === null ? context.json({ error: "Section not found" }, 404) : context.json({ section });
   });
 
@@ -322,13 +368,13 @@ export const createApp = (
       return context.json({ error: "Invalid section patch" }, 400);
     }
 
-    const section = await repository.updateSection(context.req.param("id"), result.data.title);
+    const section = await repositoryFor(context.get("userId")).updateSection(context.req.param("id"), result.data.title);
 
     return section === null ? context.json({ error: "Section not found" }, 404) : context.json({ section });
   });
 
   app.delete("/sections/:id", async (context) => {
-    const deleted = await repository.deleteSection(context.req.param("id"));
+    const deleted = await repositoryFor(context.get("userId")).deleteSection(context.req.param("id"));
 
     return deleted ? context.json({ deleted: true }) : context.json({ error: "Section not found" }, 404);
   });
@@ -340,7 +386,12 @@ export const createApp = (
       return context.json({ error: "Invalid task payload" }, 400);
     }
 
-    const task = await repository.create(
+    const taskRepository = repositoryFor(context.get("userId"));
+    if (result.data.parentId !== null && !(await taskRepository.list()).some((task) => task.id === result.data.parentId)) return context.json({ error: "Parent task not found" }, 404);
+    if (result.data.projectId !== null && !(await taskRepository.listProjects()).some((project) => project.id === result.data.projectId)) return context.json({ error: "Project not found" }, 404);
+    if (result.data.sectionId !== null && !(await taskRepository.listSections()).some((section) => section.id === result.data.sectionId)) return context.json({ error: "Section not found" }, 404);
+
+    const task = await taskRepository.create(
       result.data.title,
       result.data.parentId,
       result.data.projectId,
@@ -357,7 +408,7 @@ export const createApp = (
       return context.json({ error: "Invalid task patch" }, 400);
     }
 
-    const task = await repository.patch(context.req.param("id"), result.data);
+    const task = await repositoryFor(context.get("userId")).patch(context.req.param("id"), result.data);
 
     return task === null ? context.json({ error: "Task not found" }, 404) : context.json({ task });
   });
@@ -369,13 +420,13 @@ export const createApp = (
       return context.json({ error: "Invalid task move" }, 400);
     }
 
-    const task = await repository.move(context.req.param("id"), result.data);
+    const task = await repositoryFor(context.get("userId")).move(context.req.param("id"), result.data);
 
     return task === null ? context.json({ error: "Task not found" }, 404) : context.json({ task });
   });
 
   app.delete("/tasks/:id", async (context) => {
-    const deleted = await repository.delete(context.req.param("id"));
+    const deleted = await repositoryFor(context.get("userId")).delete(context.req.param("id"));
 
     return deleted ? context.json({ deleted: true }) : context.json({ error: "Task not found" }, 404);
   });

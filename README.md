@@ -166,6 +166,29 @@ http://127.0.0.1:5173/tools/
 
 В production режиме страница инструментов отключена.
 
+### Пользователи
+
+При миграции существующий аккаунт и его данные переносятся пользователю `admin` (если раньше в настройках было задано имя, сохраняется оно). Для первой настройки пароля администратора выполните:
+
+```bash
+task dev:docker:users:list
+task dev:docker:users:update USERNAME=legacy-admin PASSWORD='длинный-пароль-от-12-символов'
+```
+
+После этого войдите в приложение под администратором. В разделе Settings администраторы могут создавать, изменять и удалять аккаунты; каждый пользователь видит только свои задачи, проекты и секции. В системе должен оставаться хотя бы один администратор.
+
+Управление аккаунтами также доступно через CLI:
+
+```bash
+task dev:docker:users:create USERNAME=sam PASSWORD='длинный-пароль'
+task dev:docker:users:create USERNAME=admin2 PASSWORD='длинный-пароль' ADMIN=true
+task dev:docker:users:update USERNAME=sam NAME=samuel PASSWORD='новый-длинный-пароль' ADMIN=false
+task dev:docker:users:delete USERNAME=sam
+task dev:docker:users:list
+```
+
+CLI использует `DATABASE_URL` или PostgreSQL по умолчанию `postgres://todoist:todoist@127.0.0.1:5432/todoist`.
+
 Или напрямую через pnpm:
 
 ```bash

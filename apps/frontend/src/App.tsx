@@ -3,7 +3,7 @@ import type { DragEndEvent } from "@dnd-kit/core";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { FloatingFocusManager, FloatingOverlay, useFloating } from "@floating-ui/react";
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BrowserRouter, Link, useLocation, useNavigate } from "react-router-dom";
+import { BrowserRouter, Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import {
   computeDropPlacement,
   computeIndentPlacement,
@@ -674,6 +674,7 @@ const AppSidebar = ({ api, selectedProjectId = null, onInboxSelect, onProjectSel
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const sidebarScroll = useSidebarScrollPosition();
+  const authStatus = useQuery({ queryKey: authStatusQueryKey, queryFn: api?.getAuthStatus ?? (async () => null), enabled: api !== null });
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [draggingProjectId, setDraggingProjectId] = useState<ProjectId | null>(null);
   const [activeProjectDrop, setActiveProjectDrop] = useState<Readonly<{ id: ProjectId; position: "before" | "after" | "inside" }> | null>(null);
@@ -689,7 +690,7 @@ const AppSidebar = ({ api, selectedProjectId = null, onInboxSelect, onProjectSel
   const projectsQuery = useQuery({ queryKey: projectQueryKey, queryFn: api?.listProjects ?? (async () => Object.freeze([])), enabled: api !== null });
   const tasksQuery = useQuery({ queryKey: taskQueryKey, queryFn: api?.listTasks ?? (async () => Object.freeze([])), enabled: api !== null });
   const sectionsQuery = useQuery({ queryKey: sectionQueryKey, queryFn: api?.listSections ?? (async () => Object.freeze([])), enabled: api !== null });
-  const settingsQuery = useQuery({ queryKey: settingsQueryKey, queryFn: api?.getSettings ?? (async () => Object.freeze({ confirmDelete: true, accessMode: "anonymous" as const, username: null })), enabled: api !== null });
+  const settingsQuery = useQuery({ queryKey: settingsQueryKey, queryFn: api?.getSettings ?? (async () => Object.freeze({ confirmDelete: true, accessMode: "password" as const, username: "admin" })), enabled: api !== null });
   const allProjects = projectsQuery.data ?? Object.freeze([]);
   const activeProjects = allProjects.filter((project) => !project.archived);
   const navigationProjects = projectTreeOrder(activeProjects);
@@ -891,7 +892,7 @@ const AppSidebar = ({ api, selectedProjectId = null, onInboxSelect, onProjectSel
       {navLink("/dates", "Dates", <CalendarDays size={16} aria-hidden="true" />, "dates")}
       {navLink("/labels", "Labels", <Tag size={16} aria-hidden="true" />, "labels")}
       {navLink("/export", "Export", <Download size={16} aria-hidden="true" />, "export")}
-      {toolsEnabled ? navLink("/tools", "Tools", <Code2 size={16} aria-hidden="true" />, "tools") : null}
+      {toolsEnabled && authStatus.data?.user?.isAdmin === true ? navLink("/tools", "Tools", <Code2 size={16} aria-hidden="true" />, "tools") : null}
       {navLink("/settings", "Settings", <Settings size={16} aria-hidden="true" />, "settings")}
       {navLink("/archived-projects", "Archived projects", <Archive size={16} aria-hidden="true" />, "archived-projects")}
       <div className="sidebar-group">
@@ -2239,7 +2240,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
                 <p className="task-autosave-status" aria-live="polite">{detailSaveStatus}</p>
               </aside>
             </div>
-            {datePickerOpen ? <div className="task-date-picker-backdrop"><section className="task-date-picker" role="dialog" aria-modal="true" aria-label="Change date" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setDetailDueDate(selectedDetailsTask.dueDate ?? ""); setDatePickerOpen(false); if (!selectedDetailsTask.dueDate) setShowMobileDate(false); } if (event.key === "Enter" && (event.target as HTMLElement).tagName !== "BUTTON") { event.preventDefault(); void saveTaskDetails({ dueDate: detailDueDate || null }).then((saved) => { if (saved) setDatePickerOpen(false); }); } }}><h3>{selectedDetailsTask.dueDate ? "Change date" : "Add date"}</h3><DatePickerPanel autoFocus inputLabel="New date" value={detailDueDate} onChange={setDetailDueDate} /><div className="task-date-picker-actions"><button type="button" onClick={() => { setDetailDueDate(selectedDetailsTask.dueDate ?? ""); setDatePickerOpen(false); if (!selectedDetailsTask.dueDate) setShowMobileDate(false); }}>Cancel</button><button type="button" className="btn-primary" onClick={async () => { if (await saveTaskDetails({ dueDate: detailDueDate || null })) setDatePickerOpen(false); }}>Save date</button></div></section></div> : null}
+            {datePickerOpen ? <div className="task-date-picker-backdrop"><section className="task-date-picker" role="dialog" aria-modal="true" aria-label={selectedDetailsTask.dueDate ? "Change date" : "Add date"} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setDetailDueDate(selectedDetailsTask.dueDate ?? ""); setDatePickerOpen(false); if (!selectedDetailsTask.dueDate) setShowMobileDate(false); } if (event.key === "Enter" && (event.target as HTMLElement).tagName !== "BUTTON") { event.preventDefault(); void saveTaskDetails({ dueDate: detailDueDate || null }).then((saved) => { if (saved) setDatePickerOpen(false); }); } }}><h3>{selectedDetailsTask.dueDate ? "Change date" : "Add date"}</h3><DatePickerPanel autoFocus inputLabel="New date" value={detailDueDate} onChange={setDetailDueDate} /><div className="task-date-picker-actions"><button type="button" onClick={() => { setDetailDueDate(selectedDetailsTask.dueDate ?? ""); setDatePickerOpen(false); if (!selectedDetailsTask.dueDate) setShowMobileDate(false); }}>Cancel</button><button type="button" className="btn-primary" onClick={async () => { if (await saveTaskDetails({ dueDate: detailDueDate || null })) setDatePickerOpen(false); }}>Save date</button></div></section></div> : null}
           </section>
         </div>
       ) : null}
@@ -2364,16 +2365,14 @@ export const ToolsPage = ({ api, navigationApi }: Readonly<{ api: ToolsApi; navi
 
 export const SettingsPage = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const navigate = useNavigate();
-  const sidebarScroll = useSidebarScrollPosition();
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const queryClient = useQueryClient();
-  const [navigationProjectTitle, setNavigationProjectTitle] = useState("");
   const settings = useQuery({ queryKey: settingsQueryKey, queryFn: api.getSettings });
   const authStatus = useQuery({ queryKey: authStatusQueryKey, queryFn: api.getAuthStatus });
   const [confirmDelete, setConfirmDelete] = useState(true);
-  const [accessMode, setAccessMode] = useState<AppSettings["accessMode"]>("anonymous");
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
+  const [newUsername, setNewUsername] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newIsAdmin, setNewIsAdmin] = useState(false);
+  const [userDrafts, setUserDrafts] = useState<Record<string, { username: string; password: string; isAdmin: boolean }>>({});
   useEffect(() => {
     const openQuickAdd = (event: globalThis.KeyboardEvent) => {
       const target = event.target;
@@ -2383,25 +2382,36 @@ export const SettingsPage = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     window.addEventListener("keydown", openQuickAdd);
     return () => window.removeEventListener("keydown", openQuickAdd);
   }, []);
-  const projects = useQuery({ queryKey: projectQueryKey, queryFn: api.listProjects });
-  const sections = useQuery({ queryKey: sectionQueryKey, queryFn: api.listSections });
-  const tasks = useQuery({ queryKey: taskQueryKey, queryFn: api.listTasks });
+  const users = useQuery({ queryKey: ["users"], queryFn: api.listUsers, enabled: authStatus.data?.authenticated === true && authStatus.data.user?.isAdmin === true });
 
   useEffect(() => {
     if (settings.data !== undefined) {
       setConfirmDelete(settings.data.confirmDelete);
-      setAccessMode(settings.data.accessMode);
-      setUsername(settings.data.username ?? "");
     }
   }, [settings.data]);
+
+  useEffect(() => {
+    if (users.data !== undefined) setUserDrafts(Object.fromEntries(users.data.map((user) => [user.id, { username: user.username, password: "", isAdmin: user.isAdmin }])));
+  }, [users.data]);
 
   const saveSettings = useMutation({
     mutationFn: api.updateSettings,
     onSuccess: async (nextSettings) => {
       queryClient.setQueryData(settingsQueryKey, nextSettings);
-      setPassword("");
-      await queryClient.invalidateQueries({ queryKey: authStatusQueryKey });
     }
+  });
+
+  const createUser = useMutation({
+    mutationFn: api.createUser,
+    onSuccess: async () => { setNewUsername(""); setNewPassword(""); setNewIsAdmin(false); await queryClient.invalidateQueries({ queryKey: ["users"] }); await queryClient.invalidateQueries({ queryKey: authStatusQueryKey }); }
+  });
+  const updateUser = useMutation({
+    mutationFn: ({ id, patch }: Readonly<{ id: string; patch: { username?: string; password?: string; isAdmin?: boolean } }>) => api.updateUser(id, patch),
+    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["users"] }); await queryClient.invalidateQueries({ queryKey: authStatusQueryKey }); }
+  });
+  const deleteUser = useMutation({
+    mutationFn: api.deleteUser,
+    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["users"] }); await queryClient.invalidateQueries({ queryKey: authStatusQueryKey }); }
   });
 
   const logOut = async () => {
@@ -2415,7 +2425,7 @@ export const SettingsPage = ({ api }: Readonly<{ api: ApplicationApi }>) => {
       <section className="workspace card shadow-sm settings-panel" aria-label="Settings">
         <header className="header">
           <h1>Settings</h1>
-          <p className="settings-intro">Manage confirmations and access to your task workspace.</p>
+          <p className="settings-intro">Manage your task preferences and user accounts.</p>
         </header>
 
         {settings.isLoading ? <p className="muted">Loading settings…</p> : null}
@@ -2425,12 +2435,7 @@ export const SettingsPage = ({ api }: Readonly<{ api: ApplicationApi }>) => {
             className="settings-form"
             onSubmit={(event) => {
               event.preventDefault();
-              saveSettings.mutate({
-                confirmDelete,
-                accessMode,
-                username: username.trim() || null,
-                ...(password.length > 0 ? { password } : {})
-              });
+              saveSettings.mutate({ confirmDelete });
             }}
           >
             <fieldset className="settings-group">
@@ -2439,47 +2444,7 @@ export const SettingsPage = ({ api }: Readonly<{ api: ApplicationApi }>) => {
                 <input type="checkbox" checked={confirmDelete} onChange={(event) => setConfirmDelete(event.target.checked)} />
                 Ask for confirmation before deleting tasks, projects, or sections
               </label>
-              <p className="settings-help">Enabled by default. This setting applies to all delete actions.</p>
-            </fieldset>
-
-            <fieldset className="settings-group">
-              <legend>Workspace access</legend>
-              <label className="settings-choice">
-                <input type="radio" name="access-mode" value="anonymous" checked={accessMode === "anonymous"} onChange={() => setAccessMode("anonymous")} />
-                <span>
-                  <strong>Anonymous access</strong>
-                  <small>Anyone who can reach this app can use it.</small>
-                </span>
-              </label>
-              <label className="settings-choice">
-                <input type="radio" name="access-mode" value="password" checked={accessMode === "password"} onChange={() => setAccessMode("password")} />
-                <span>
-                  <strong>Require login and password</strong>
-                  <small>Protect task data and tools behind a session.</small>
-                </span>
-              </label>
-
-              {accessMode === "password" ? (
-                <div className="settings-credentials">
-                  <label>
-                    Login
-                    <input autoComplete="username" maxLength={64} required value={username} onChange={(event) => setUsername(event.target.value)} />
-                  </label>
-                  <label>
-                    {settings.data.username === null ? "Password" : "New password"}
-                    <input
-                      autoComplete="new-password"
-                      minLength={12}
-                      maxLength={128}
-                      required={settings.data.username === null}
-                      type="password"
-                      value={password}
-                      onChange={(event) => setPassword(event.target.value)}
-                    />
-                  </label>
-                  <p className="settings-help">Use at least 12 characters. Leave the password blank to keep the current one.</p>
-                </div>
-              ) : null}
+              <p className="settings-help">Enabled by default. This applies to your delete actions.</p>
             </fieldset>
 
             {saveSettings.isError ? <p className="error" role="alert">Unable to save settings. Check the login and password requirements.</p> : null}
@@ -2488,7 +2453,7 @@ export const SettingsPage = ({ api }: Readonly<{ api: ApplicationApi }>) => {
               <button className="settings-save" type="submit" disabled={saveSettings.isPending}>
                 Save settings
               </button>
-              {authStatus.data?.accessMode === "password" && authStatus.data.authenticated ? (
+              {authStatus.data?.authenticated ? (
                 <button className="settings-logout" type="button" onClick={() => void logOut()}>
                   <KeyRound size={16} aria-hidden="true" />
                   Log out
@@ -2496,6 +2461,32 @@ export const SettingsPage = ({ api }: Readonly<{ api: ApplicationApi }>) => {
               ) : null}
             </div>
           </form>
+        ) : null}
+        {authStatus.data?.user?.isAdmin && !authStatus.data.authenticated ? <p className="settings-help">Set the initial administrator password with the backend CLI before managing accounts.</p> : null}
+        {authStatus.data?.authenticated && authStatus.data.user?.isAdmin ? (
+          <section className="settings-group user-management" aria-label="Manage users">
+            <h2>Users</h2>
+            <form className="settings-credentials" onSubmit={(event) => { event.preventDefault(); createUser.mutate({ username: newUsername.trim().toLowerCase(), password: newPassword, isAdmin: newIsAdmin }); }}>
+              <label>Username<input required maxLength={64} value={newUsername} onChange={(event) => setNewUsername(event.target.value)} /></label>
+              <label>Password<input required minLength={12} maxLength={128} type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /></label>
+              <label className="settings-checkbox"><input type="checkbox" checked={newIsAdmin} onChange={(event) => setNewIsAdmin(event.target.checked)} />Administrator</label>
+              <button className="settings-save" type="submit" disabled={createUser.isPending}>Create user</button>
+            </form>
+            {createUser.isError ? <p className="error" role="alert">Could not create user. Usernames must be unique and passwords at least 12 characters.</p> : null}
+            {users.isLoading ? <p className="muted">Loading users…</p> : null}
+            {users.isError ? <p className="error">Unable to load users.</p> : null}
+            <div className="managed-users">{(users.data ?? []).map((user) => {
+              const draft = userDrafts[user.id] ?? { username: user.username, password: "", isAdmin: user.isAdmin };
+              return <form className="managed-user" key={user.id} onSubmit={(event) => { event.preventDefault(); updateUser.mutate({ id: user.id, patch: { username: draft.username.trim().toLowerCase(), isAdmin: draft.isAdmin, ...(draft.password ? { password: draft.password } : {}) } }); }}>
+                <label>Username<input required maxLength={64} value={draft.username} onChange={(event) => setUserDrafts((current) => ({ ...current, [user.id]: { ...draft, username: event.target.value } }))} /></label>
+                <label>New password<input minLength={12} maxLength={128} type="password" placeholder="Leave blank to keep" value={draft.password} onChange={(event) => setUserDrafts((current) => ({ ...current, [user.id]: { ...draft, password: event.target.value } }))} /></label>
+                <label className="settings-checkbox"><input type="checkbox" checked={draft.isAdmin} onChange={(event) => setUserDrafts((current) => ({ ...current, [user.id]: { ...draft, isAdmin: event.target.checked } }))} />Administrator</label>
+                <button type="submit" disabled={updateUser.isPending}>Save</button>
+                <button type="button" className="danger" disabled={deleteUser.isPending || (user.isAdmin && (users.data ?? []).filter((item) => item.isAdmin).length < 2)} onClick={() => { if (window.confirm(`Delete user ${user.username} and all their task data?`)) deleteUser.mutate(user.id); }}>Delete</button>
+              </form>;
+            })}</div>
+            {updateUser.isError || deleteUser.isError ? <p className="error" role="alert">Unable to update users. Keep at least one administrator.</p> : null}
+          </section>
         ) : null}
       </section>
     </main>
@@ -2593,6 +2584,7 @@ const AppRouter = () => {
   if (path.startsWith("/archived-projects")) return <ArchivedProjectsPage api={api} />;
 
   if (path.startsWith("/tools")) {
+    if (authStatus.data.user?.isAdmin !== true) return <Navigate to="/" replace />;
     return <ToolsPage api={createToolsApi()} navigationApi={api} />;
   }
 

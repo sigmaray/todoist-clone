@@ -16,6 +16,7 @@ export default defineConfig({
         bypass: (request) => request.headers.accept?.includes("text/html") ? request.url : undefined
       },
       "/tasks": apiTarget,
+      "/users": apiTarget,
       "/tools-api": apiTarget
     }
   }
