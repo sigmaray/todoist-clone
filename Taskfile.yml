@@ -7,6 +7,7 @@ vars:
   DB_PASSWORD: '{{.DB_PASSWORD | default "todoist"}}'
   DB_NAME: '{{.DB_NAME | default "todoist"}}'
   DATABASE_URL: '{{.DATABASE_URL | default "postgres://todoist:todoist@127.0.0.1:5432/todoist"}}'
+  DB_DUMP_FILE: '{{.DB_DUMP_FILE | default (printf "dumps/todoist-%s.dump" (now | date "2006-01-02_150405"))}}'
 
 tasks:
   backend:
@@ -67,3 +68,18 @@ tasks:
     dir: apps/backend
     cmds:
       - DATABASE_URL="{{.DATABASE_URL}}" pnpm exec drizzle-kit migrate --config drizzle.config.ts
+
+  dev:docker:db:dump:
+    desc: Save a restorable custom-format dump from the dev Docker database
+    cmds:
+      - mkdir -p "$(dirname "{{.DB_DUMP_FILE}}")"
+      - docker compose --env-file .env.example -f docker-compose.dev.yml exec -T postgres pg_dump -U "{{.DB_USER}}" -d "{{.DB_NAME}}" --format=custom > "{{.DB_DUMP_FILE}}"
+      - echo "Database dump saved to {{.DB_DUMP_FILE}}"
+
+  dev:docker:db:restore:
+    desc: Restore a custom-format dump into the dev Docker database (replaces existing objects)
+    vars:
+      DUMP_FILE: '{{.DUMP_FILE | default .DB_DUMP_FILE}}'
+    cmds:
+      - test -f "{{.DUMP_FILE}}"
+      - docker compose --env-file .env.example -f docker-compose.dev.yml exec -T postgres pg_restore -U "{{.DB_USER}}" -d "{{.DB_NAME}}" --clean --if-exists --no-owner --no-privileges --exit-on-error < "{{.DUMP_FILE}}"
