@@ -15,8 +15,8 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: `DATABASE_URL=${databaseUrl} PORT=${backendPort} pnpm --filter @todoist-clone/backend exec drizzle-kit migrate --config drizzle.config.ts && DATABASE_URL=${databaseUrl} PORT=${backendPort} pnpm --filter @todoist-clone/backend dev`,
-      url: `http://127.0.0.1:${backendPort}/tasks`,
+      command: `DATABASE_URL=${databaseUrl} pnpm --filter @todoist-clone/backend exec drizzle-kit migrate --config drizzle.config.ts && DATABASE_URL=${databaseUrl} pnpm --filter @todoist-clone/backend users update admin --password=todoist-e2e-password && DATABASE_URL=${databaseUrl} PORT=${backendPort} pnpm --filter @todoist-clone/backend dev`,
+      url: `http://127.0.0.1:${backendPort}/auth/status`,
       reuseExistingServer: false
     },
     {

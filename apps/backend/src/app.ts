@@ -107,10 +107,7 @@ export const createApp = (
     }
 
     if (!(await userRepository.hasPasswordUsers())) {
-      context.set("userId", "legacy-admin");
-      context.set("authenticated", false);
-      await next();
-      return;
+      return context.json({ error: "Administrator password must be configured before using the API" }, 503);
     }
 
     const token = getCookie(context, sessionCookieName);
@@ -134,7 +131,7 @@ export const createApp = (
     const authenticated = activeUser !== null;
 
     context.header("Cache-Control", "no-store");
-    return context.json({ accessMode: requiresLogin ? "password" : "anonymous", authenticated, user: effectiveUser === null ? null : { id: effectiveUser.id, username: effectiveUser.username, isAdmin: effectiveUser.isAdmin } });
+    return context.json({ accessMode: "password", authenticated, user: effectiveUser === null ? null : { id: effectiveUser.id, username: effectiveUser.username, isAdmin: effectiveUser.isAdmin } });
   });
 
   app.post("/auth/login", async (context) => {
@@ -257,8 +254,7 @@ export const createApp = (
   if (options.databaseUrl !== undefined) {
     app.use("/tools-api/*", async (context, next) => {
       const administrator = await requireAdmin(context.get("userId"));
-      const bootstrapAdmin = !context.get("authenticated") && !(await userRepository.hasPasswordUsers()) && context.get("userId") === "legacy-admin";
-      if ((!context.get("authenticated") && !bootstrapAdmin) || !administrator) return context.json({ error: "Administrator access required" }, 403);
+      if (!context.get("authenticated") || !administrator) return context.json({ error: "Administrator access required" }, 403);
       await next();
     });
     app.route("/tools-api", createToolsRouter(options.databaseUrl, options.mode ?? "development"));

@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 import type { Page } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
@@ -228,7 +228,7 @@ test("adapts task details to a small mobile viewport", async ({ page }, testInfo
   const layout = dialog.locator(".task-details-layout");
   expect(await layout.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
   await expect(dialog.locator(".task-subtasks-card")).toBeHidden();
-  await dialog.getByRole("button", { name: "Add subtasks" }).click();
+  await dialog.getByRole("button", { name: "Subtasks" }).click();
   await expect(dialog.locator(".task-subtasks-card")).toBeVisible();
   await expect(dialog.getByLabel("New subtask title")).toBeFocused();
   const subtaskTitle = `Visible mobile subtask ${testInfo.workerIndex}-${Date.now()}`;
@@ -247,19 +247,19 @@ test("adapts task details to a small mobile viewport", async ({ page }, testInfo
   await dialog.getByLabel("Project, section, or Inbox").scrollIntoViewIfNeeded();
   await expect(dialog.getByLabel("Project, section, or Inbox")).toBeVisible();
   await expect(dialog.locator(".task-comments")).toBeHidden();
-  await expect(dialog.getByRole("button", { name: "Add labels" })).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "Add comments" })).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "Add date" })).toBeVisible();
-  await dialog.getByRole("button", { name: "Add labels" }).click();
+  await expect(dialog.getByRole("button", { name: "Labels" })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Comments" })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Date" })).toBeVisible();
+  await dialog.getByRole("button", { name: "Labels" }).click();
   await expect(dialog.getByRole("textbox", { name: "Labels" })).toBeFocused();
-  await dialog.getByRole("button", { name: "Add comments" }).click();
+  await dialog.getByRole("button", { name: "Comments" }).click();
   await expect(dialog.locator(".task-comments")).toBeVisible();
   await expect(dialog.getByLabel("Add comment")).toBeFocused();
   expect(await dialog.locator(".task-comments").evaluate((comments) => {
     const button = comments.querySelector<HTMLElement>(".btn-primary");
     return button !== null && button.getBoundingClientRect().width >= comments.getBoundingClientRect().width - 33;
   })).toBe(true);
-  await dialog.getByRole("button", { name: "Add date" }).click();
+  await dialog.getByRole("button", { name: "Date" }).click();
   const dateDialog = dialog.getByRole("dialog", { name: "Add date" });
   await expect(dateDialog).toBeVisible();
   await expect(dateDialog.getByLabel("New date")).toBeFocused();
@@ -309,6 +309,9 @@ test("keeps optional Add task fields collapsed on mobile until requested", async
   const page = await context.newPage();
   try {
     await page.goto("/");
+    await page.getByLabel("Login").fill("admin");
+    await page.getByLabel("Password").fill("todoist-e2e-password");
+    await page.getByRole("button", { name: "Sign in" }).click();
     const quickAdd = page.getByRole("button", { name: "Quick add task" });
     await expect(quickAdd).toBeVisible();
     const quickAddBounds = await quickAdd.boundingBox();
@@ -320,22 +323,22 @@ test("keeps optional Add task fields collapsed on mobile until requested", async
     const shortcuts = dialog.locator(".add-task-mobile-shortcuts");
 
     await expect(dialog.getByLabel("New task description")).toBeHidden();
-    await shortcuts.getByRole("button", { name: "Add description" }).click();
+    await shortcuts.getByRole("button", { name: "Description" }).click();
     await expect(dialog.getByLabel("New task description")).toBeFocused();
     await dialog.getByRole("button", { name: "Clear description and hide section" }).click();
-    await expect(shortcuts.getByRole("button", { name: "Add description" })).toBeVisible();
+    await expect(shortcuts.getByRole("button", { name: "Description" })).toBeVisible();
 
-    await shortcuts.getByRole("button", { name: "Add labels" }).click();
+    await shortcuts.getByRole("button", { name: "Labels" }).click();
     await expect(dialog.getByLabel("New task labels")).toBeFocused();
     await dialog.getByRole("button", { name: "Remove labels and hide section" }).click();
-    await expect(shortcuts.getByRole("button", { name: "Add labels" })).toBeVisible();
+    await expect(shortcuts.getByRole("button", { name: "Labels" })).toBeVisible();
 
-    await shortcuts.getByRole("button", { name: "Add date" }).click();
+    await shortcuts.getByRole("button", { name: "Date", exact: true }).click({ timeout: 5000 });
     const dateDialog = dialog.getByRole("dialog", { name: "Add date" });
     await expect(dateDialog).toBeVisible();
     await expect(dateDialog.getByLabel("New task date")).toBeFocused();
   } finally {
-    await context.close();
+    await context.close().catch(() => undefined);
   }
 });
 
@@ -416,7 +419,7 @@ test("opens settings with deletion confirmation enabled by default", async ({ pa
 
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
   await expect(page.getByRole("checkbox", { name: /Ask for confirmation before deleting/ })).toBeChecked();
-  await expect(page.getByText(/Set the initial administrator password with the backend CLI/)).toBeVisible();
+  await expect(page.getByText(/Set the initial administrator password with the backend CLI/)).toHaveCount(0);
 });
 
 test("adds tasks directly to sections and deletes all tasks within Inbox or a project", async ({ page }, testInfo) => {

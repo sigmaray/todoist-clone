@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 const unique = (label: string) => `${label} ${Date.now()}-${Math.random().toString(16).slice(2, 7)}`;
 
@@ -66,7 +66,7 @@ test("edits task details and copies all Markdown", async ({ context, page }) => 
   await expect(dateDialog).toBeVisible();
   await expect(page.getByLabel("New date")).toHaveValue(new Date().toLocaleDateString("en-CA"));
   await dateDialog.getByRole("button", { name: "Save date" }).click();
-  await expect(taskDialog.locator(".task-detail-date")).toContainText(String(new Date().getFullYear()));
+  await expect(taskDialog.locator(".task-detail-date")).toHaveText("today");
   await taskDialog.locator(".task-detail-date").click();
   await expect(page.getByRole("dialog", { name: "Change date" })).toBeVisible();
   await page.getByLabel("New date").press("Escape");
@@ -77,6 +77,7 @@ test("edits task details and copies all Markdown", async ({ context, page }) => 
   await page.getByRole("dialog", { name: "Change date" }).getByRole("button", { name: "Save date" }).click();
   await taskDialog.getByRole("textbox", { name: "Labels" }).fill("work");
   await page.keyboard.press("Enter");
+  await expect(taskDialog.getByText("work", { exact: true })).toBeVisible();
   await taskDialog.getByRole("textbox", { name: "Labels" }).fill("review");
   await page.keyboard.press("Enter");
   const commentEditor = page.getByLabel("Add comment");
@@ -102,7 +103,7 @@ test("edits task details and copies all Markdown", async ({ context, page }) => 
   await page.getByRole("button", { name: title, exact: true }).click();
   const reopenedDialog = page.getByRole("dialog", { name: `Task details: ${title}` });
   await expect(reopenedDialog.getByRole("button", { name: "Edit task description" })).toHaveText("Task details saved from the dialog");
-  await expect(reopenedDialog.locator(".task-detail-date")).toHaveAttribute("title", "2026-11-01");
+  await expect(reopenedDialog.locator(".task-detail-date")).toHaveAttribute("title", "Due 2026-11-01");
   await expect(reopenedDialog.locator(".label-picker-chip").nth(0)).toContainText("work");
   await expect(reopenedDialog.locator(".label-picker-chip").nth(1)).toContainText("review");
   await expect(page.getByText("First comment")).toBeVisible();

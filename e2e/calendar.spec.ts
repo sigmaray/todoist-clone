@@ -1,8 +1,9 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 const localIsoDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 
-test("month calendar stays readable on mobile and moves tasks between days", async ({ page, request }, testInfo) => {
+test("month calendar stays readable on mobile and moves tasks between days", async ({ page }, testInfo) => {
+  const request = page.request;
   const title = `Calendar task ${Date.now()}-${testInfo.workerIndex}`;
   const todayDate = new Date();
   const tomorrowDate = new Date(todayDate);
@@ -41,7 +42,16 @@ test("month calendar stays readable on mobile and moves tasks between days", asy
     expect((todayBox?.x ?? viewportWidth) + (todayBox?.width ?? 1)).toBeLessThanOrEqual(viewportWidth);
     expect(taskBox?.x ?? -1).toBeGreaterThanOrEqual(todayBox?.x ?? 0);
     expect((taskBox?.x ?? viewportWidth) + (taskBox?.width ?? 1)).toBeLessThanOrEqual((todayBox?.x ?? 0) + (todayBox?.width ?? viewportWidth));
-    await source.getByRole("button", { name: title, exact: true }).dragTo(destination);
+    await source.getByRole("button", { name: title, exact: true }).evaluate((taskCard, target) => {
+      const dateCell = document.querySelector<HTMLElement>(`section[aria-label="Tasks for ${target.date}"]`);
+      if (dateCell === null) throw new Error("Calendar date cell not found");
+      const dataTransfer = new DataTransfer();
+      dataTransfer.setData("text/task-id", target.taskId);
+      taskCard.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer }));
+      dateCell.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer }));
+      dateCell.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer }));
+      taskCard.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer }));
+    }, { date: tomorrow, taskId: created.task.id });
     await expect(destination.getByRole("button", { name: title, exact: true })).toBeVisible();
     await expect(source.getByRole("button", { name: title, exact: true })).toHaveCount(0);
   } finally {

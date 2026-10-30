@@ -1,17 +1,53 @@
 import { getRequestListener } from "@hono/node-server";
-import { createServer } from "node:http";
+import { createServer, type Server } from "node:http";
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { createApp } from "./app";
 import { hashPassword } from "./auth";
 import { createMemoryTaskRepository } from "./repository";
 import { createMemoryUserRepository } from "./users";
 
-const createTestServer = () => createServer(getRequestListener(createApp().fetch));
+const activeServers = new Set<Server>();
+
+const createTestServer = async (app: ReturnType<typeof createApp>) => {
+  const server = createServer(getRequestListener(app.fetch));
+  activeServers.add(server);
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.removeListener("error", reject);
+      resolve();
+    });
+  });
+  return server;
+};
+
+const createTestAgent = async () => {
+  const userRepository = createMemoryUserRepository([Object.freeze({
+    id: "test-admin",
+    username: "test-admin",
+    passwordHash: await hashPassword("test-admin-password"),
+    isAdmin: true,
+    confirmDelete: true,
+    inboxDescription: ""
+  })]);
+  const server = await createTestServer(createApp(createMemoryTaskRepository(), { userRepository }));
+  const agent = request.agent(server);
+  await agent.post("/auth/login").send({ username: "test-admin", password: "test-admin-password" }).expect(200);
+  return agent;
+};
+
+afterEach(async () => {
+  const servers = [...activeServers];
+  activeServers.clear();
+  await Promise.all(servers.map((server) => new Promise<void>((resolve, reject) => {
+    server.close((error) => error ? reject(error) : resolve());
+  })));
+});
 
 describe("POST /tasks", () => {
   it("creates a task", async () => {
-    const response = await request(createTestServer())
+    const response = await (await createTestAgent())
       .post("/tasks")
       .send({ title: "Ship MVP" })
       .expect(201);
@@ -26,7 +62,7 @@ describe("POST /tasks", () => {
   });
 
   it("updates and deletes a task", async () => {
-    const agent = request(createTestServer());
+    const agent = await createTestAgent();
     const createResponse = await agent.post("/tasks").send({ title: "Draft title" }).expect(201);
     const id = createResponse.body.task.id;
 
@@ -42,7 +78,7 @@ describe("POST /tasks", () => {
   });
 
   it("creates projects, inbox sections, and moves tasks between them", async () => {
-    const agent = request(createTestServer());
+    const agent = await createTestAgent();
     const projectResponse = await agent.post("/projects").send({ title: "Roadmap" }).expect(201);
     const sectionResponse = await agent.post("/sections").send({ title: "Later" }).expect(201);
     const taskResponse = await agent.post("/tasks").send({ title: "Sort inbox" }).expect(201);
@@ -86,7 +122,7 @@ describe("POST /tasks", () => {
   });
 
   it("updates and deletes sections without deleting tasks", async () => {
-    const agent = request(createTestServer());
+    const agent = await createTestAgent();
     const sectionResponse = await agent.post("/sections").send({ title: "Later" }).expect(201);
     const taskResponse = await agent
       .post("/tasks")
@@ -112,7 +148,7 @@ describe("POST /tasks", () => {
   });
 
   it("updates and deletes projects, cascading to their sections and tasks", async () => {
-    const agent = request(createTestServer());
+    const agent = await createTestAgent();
     const projectResponse = await agent.post("/projects").send({ title: "Roadmap" }).expect(201);
     const projectId = projectResponse.body.project.id;
     const sectionResponse = await agent.post("/sections").send({ title: "Later", projectId }).expect(201);
@@ -144,7 +180,7 @@ describe("POST /tasks", () => {
   });
 
   it("duplicates project descriptions independently and remaps sections and task hierarchy", async () => {
-    const agent = request(createTestServer());
+    const agent = await createTestAgent();
     const source = (await agent.post("/projects").send({ title: "Source" }).expect(201)).body.project;
     await agent.patch(`/projects/${source.id}`).send({ description: "Original notes" }).expect(200);
     const section = (await agent.post("/sections").send({ title: "Milestone", projectId: source.id }).expect(201)).body.section;
@@ -180,14 +216,14 @@ describe("POST /tasks", () => {
   });
 
   it("returns 404 for unknown projects", async () => {
-    const agent = request(createTestServer());
+    const agent = await createTestAgent();
 
     await agent.patch("/projects/missing").send({ title: "Nope" }).expect(404);
     await agent.delete("/projects/missing").expect(404);
   });
 
   it("persists task details and supports archiving and duplicating projects", async () => {
-    const agent = request(createTestServer());
+    const agent = await createTestAgent();
     const project = (await agent.post("/projects").send({ title: "Plan" }).expect(201)).body.project as { id: string };
     const task = (await agent.post("/tasks").send({ title: "Draft", projectId: project.id }).expect(201)).body.task as { id: string };
     await agent.patch(`/tasks/${task.id}`).send({ description: "Details", dueDate: "2026-11-01", labels: ["work"], comments: [{ id: "c1", body: "First comment", createdAt: new Date().toISOString() }] }).expect(200);
@@ -200,7 +236,7 @@ describe("POST /tasks", () => {
   });
 
   it("reorders tasks with beforeId and afterId", async () => {
-    const agent = request(createTestServer());
+    const agent = await createTestAgent();
     const create = async (title: string) => (await agent.post("/tasks").send({ title }).expect(201)).body.task as { id: string };
 
     const first = await create("First");
@@ -229,7 +265,7 @@ describe("POST /tasks", () => {
 
 describe("PATCH /projects/:id/order", () => {
   it("persists the requested project order", async () => {
-    const agent = request(createTestServer());
+    const agent = await createTestAgent();
     const created = await Promise.all(["First", "Second", "Third"].map((title) => agent.post("/projects").send({ title }).expect(201)));
     const [first, second, third] = created.map((response) => response.body.project);
 
@@ -242,7 +278,7 @@ describe("PATCH /projects/:id/order", () => {
 
 describe("project hierarchy", () => {
   it("creates subprojects, moves projects across levels, and rejects cycles", async () => {
-    const agent = request(createTestServer());
+    const agent = await createTestAgent();
     const root = (await agent.post("/projects").send({ title: "Root" }).expect(201)).body.project;
     const child = (await agent.post("/projects").send({ title: "Child", parentId: root.id }).expect(201)).body.project;
     const secondChild = (await agent.post("/projects").send({ title: "Second child", parentId: root.id }).expect(201)).body.project;
@@ -262,7 +298,7 @@ describe("project hierarchy", () => {
 
 describe("PATCH /sections/:id/order", () => {
   it("persists the requested section order within its scope", async () => {
-    const agent = request(createTestServer());
+    const agent = await createTestAgent();
     const created = await Promise.all(["First", "Second", "Third"].map((title) => agent.post("/sections").send({ title }).expect(201)));
     const [first, second, third] = created.map((response) => response.body.section);
     await agent.patch(`/sections/${third.id}/order`).send({ beforeId: first.id, afterId: null }).expect(200);
@@ -272,10 +308,23 @@ describe("PATCH /sections/:id/order", () => {
 });
 
 describe("settings and session authentication", () => {
+  it("blocks API access until the administrator configures a password", async () => {
+    const server = await createTestServer(createApp());
+    const agent = request(server);
+
+    await agent.get("/auth/status").expect(200).expect(({ body }) => {
+      expect(body).toMatchObject({ accessMode: "password", authenticated: false });
+    });
+    await agent.get("/tasks").expect(503).expect(({ body }) => {
+      expect(body.error).toMatch(/password must be configured/i);
+    });
+    await agent.post("/tasks").send({ title: "Anonymous task" }).expect(503);
+  });
+
   it("defaults to delete confirmations and allows updating that preference", async () => {
     const passwordHash = await hashPassword("a-long-test-password");
     const userRepository = createMemoryUserRepository([Object.freeze({ id: "legacy-admin", username: "admin", passwordHash, isAdmin: true, confirmDelete: true, inboxDescription: "" })]);
-    const server = createServer(getRequestListener(createApp(createMemoryTaskRepository(), { userRepository }).fetch));
+    const server = await createTestServer(createApp(createMemoryTaskRepository(), { userRepository }));
     const agent = request.agent(server);
 
     await agent.post("/auth/login").send({ username: "admin", password: "a-long-test-password" }).expect(200);
@@ -289,7 +338,7 @@ describe("settings and session authentication", () => {
   it("persists the Inbox description", async () => {
     const passwordHash = await hashPassword("a-long-test-password");
     const userRepository = createMemoryUserRepository([Object.freeze({ id: "legacy-admin", username: "admin", passwordHash, isAdmin: true, confirmDelete: true, inboxDescription: "" })]);
-    const server = createServer(getRequestListener(createApp(createMemoryTaskRepository(), { userRepository }).fetch));
+    const server = await createTestServer(createApp(createMemoryTaskRepository(), { userRepository }));
     const agent = request.agent(server);
 
     await agent.post("/auth/login").send({ username: "admin", password: "a-long-test-password" }).expect(200);
@@ -301,7 +350,7 @@ describe("settings and session authentication", () => {
   it("protects app routes with a user-specific HttpOnly session cookie", async () => {
     const passwordHash = await hashPassword("a-long-test-password");
     const userRepository = createMemoryUserRepository([Object.freeze({ id: "legacy-admin", username: "admin", passwordHash, isAdmin: true, confirmDelete: true, inboxDescription: "" })]);
-    const server = createServer(getRequestListener(createApp(createMemoryTaskRepository(), { userRepository }).fetch));
+    const server = await createTestServer(createApp(createMemoryTaskRepository(), { userRepository }));
     const agent = request.agent(server);
 
     await agent.get("/tasks").expect(401);
@@ -319,7 +368,7 @@ describe("settings and session authentication", () => {
   it("allows only administrators to manage accounts and preserves an administrator", async () => {
     const passwordHash = await hashPassword("a-long-test-password");
     const userRepository = createMemoryUserRepository([Object.freeze({ id: "legacy-admin", username: "admin", passwordHash, isAdmin: true, confirmDelete: true, inboxDescription: "" })]);
-    const server = createServer(getRequestListener(createApp(createMemoryTaskRepository(), { userRepository }).fetch));
+    const server = await createTestServer(createApp(createMemoryTaskRepository(), { userRepository }));
     const agent = request.agent(server);
     await agent.post("/auth/login").send({ username: "admin", password: "a-long-test-password" }).expect(200);
     const created = await agent.post("/users").send({ username: "sam", password: "another-long-test-pass", isAdmin: false }).expect(201);
@@ -341,7 +390,7 @@ describe("settings and session authentication", () => {
       repositories = Object.freeze({ ...repositories, [userId]: created });
       return created;
     };
-    const server = createServer(getRequestListener(createApp(repositoryFor, { userRepository }).fetch));
+    const server = await createTestServer(createApp(repositoryFor, { userRepository }));
     const admin = request.agent(server);
     await admin.post("/auth/login").send({ username: "admin", password: "a-long-test-password" }).expect(200);
     const createdUser = await admin.post("/users").send({ username: "sam", password: "another-long-test-pass" }).expect(201);

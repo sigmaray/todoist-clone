@@ -1,5 +1,23 @@
 # Project Memory
 
+## 2026-10-30 — Fix Supertest startup and run the complete suite
+
+- Backend tests now start their HTTP servers explicitly, wait for the `listening` event, and close servers after each test. Data-route tests log in as a test administrator; the no-password regression test still exercises unauthenticated access directly.
+- Playwright webServer now checks the public auth-status route and configures a known administrator password in the isolated E2E database. Added a shared authenticated-page fixture and updated API-backed E2E setup plus stale mobile/date assertions.
+- Verification: `pnpm test` passes (78 tests), `pnpm build` passes, `git diff --check` passes, and full Playwright E2E passes (23 tests) against a fresh database.
+
+## 2026-10-27 — Require administrator password before API access
+
+- Removed anonymous API access when the database has no password-protected users. Protected requests now return HTTP 503 until the administrator password is configured; `/auth/status` reports password mode so the UI shows sign-in.
+- Removed the unauthenticated bootstrap exception for database tools; tools now require an authenticated administrator session.
+- Added a backend regression test for the empty-password state. Backend build and `git diff --check` pass. Backend tests remain blocked by the existing Supertest null server address issue (all 18 tests fail before reaching their assertions).
+
+## 2026-10-26 — Production readiness assessment
+
+- Reviewed the current repository, auth/session flow, API middleware, database tools, example configuration, and Docker setup for production readiness; no application code changed.
+- Conclusion: suitable for local/personal MVP use after setup, but not ready to expose directly to the internet. Key blockers include anonymous access until a password is configured, no login throttling, destructive SQL/database tools enabled in every mode except exact `production`, development-only deployment assets, and no documented production migration/backup/restore/monitoring workflow.
+- Verification: static review only; tests were not run for this assessment. Existing user change `D .aws` was left untouched.
+
 ## 2026-10-25 — Clarify task due date display
 
 - Task rows, task details, and archived task entries now show a calendar icon with the due date; today is labeled `today`, upcoming dates are black, and past dates are red.

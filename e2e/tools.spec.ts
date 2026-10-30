@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 test("runs a SQL query from the development tools page", async ({ page }) => {
   await page.goto("/tools/");
