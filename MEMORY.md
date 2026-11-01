@@ -1,5 +1,11 @@
 # Project Memory
 
+## 2026-11-01 — Add right-click task actions
+
+- Added a right-click context menu to task rows in Inbox and project views with Open, Quick edit, Add subtask, and Delete. The menu uses the existing task handlers, closes on outside click or Escape, and stays within the viewport.
+- Added frontend coverage for the menu and Quick edit, plus a Playwright scenario confirming it appears in Inbox and projects and opens task details.
+- Verification: `pnpm test` passes (80 tests), `pnpm build` and `git diff --check` pass. Full E2E ran 24 tests: the new context-menu test passed; 16 passed overall and 8 unrelated existing scenarios failed or timed out (date picker interaction, project/section flows, and mobile/sidebar checks).
+
 ## 2026-10-30 — Allow passwords of any nonzero length
 
 - Removed minimum and maximum password-length checks from login, user creation, password updates, and account forms. Password inputs remain required for account creation; empty API/CLI password values are rejected, while omitted update passwords leave the existing password unchanged.

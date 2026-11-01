@@ -13,7 +13,7 @@ import {
 import type { Project, ProjectId, Section, SectionId, Task, TaskId, TaskNode } from "@todoist-clone/domain";
 import clsx from "clsx";
 import { Archive, CalendarDays, ChevronLeft, ChevronRight, ClipboardCopy, Code2, Copy, Database, Download, Edit3, Eye, GripVertical, Inbox, KeyRound, MessageSquare, MoreHorizontal, Menu, Plus, Search, Settings, Tag, Trash2, X } from "lucide-react";
-import type { DragEvent, FormEvent, KeyboardEvent, ReactElement, PointerEvent as ReactPointerEvent, UIEvent } from "react";
+import type { DragEvent, FormEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, ReactElement, PointerEvent as ReactPointerEvent, UIEvent } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import "./vendor/bootstrap.min.css";
@@ -45,6 +45,12 @@ type DropZoneId = "inbox" | `project:${ProjectId}` | `section:${SectionId}`;
 type ActiveDragTarget = Readonly<{
   taskId: TaskId;
   placement: DragPlacement;
+}>;
+
+type TaskContextMenuState = Readonly<{
+  task: TaskNode;
+  left: number;
+  top: number;
 }>;
 
 type MoveInput = Readonly<{
@@ -153,6 +159,7 @@ const renderTaskNodes = (
     toggleTask: (task: TaskNode) => void;
     startEditing: (task: TaskNode) => void;
     openDetails: (task: TaskNode) => void;
+    openContextMenu: (task: TaskNode) => (event: ReactMouseEvent<HTMLElement>) => void;
     deleteTask: (task: TaskNode) => void;
     startSubtask: (task: TaskNode) => void;
     submitSubtask: (task: TaskNode) => void;
@@ -203,6 +210,7 @@ const renderTaskNodes = (
           onDragLeave={actions.clearDragTarget}
           onDrop={actions.moveTaskOntoTask(task)}
           onKeyDown={actions.handleTaskKeys(task)}
+          onContextMenu={actions.openContextMenu(task)}
           style={{ paddingLeft: `${depth * 1.25}rem` }}
         >
           <input
@@ -984,6 +992,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const [markdownModal, setMarkdownModal] = useState<Readonly<{ title: string; markdown: string; format?: "markdown" | "json" }> | null>(null);
   const [scopeExportOpen, setScopeExportOpen] = useState(false);
   const [detailsTaskId, setDetailsTaskId] = useState<TaskId | null>(null);
+  const [taskContextMenu, setTaskContextMenu] = useState<TaskContextMenuState | null>(null);
   const [detailTitle, setDetailTitle] = useState("");
   const [detailDescription, setDetailDescription] = useState("");
   const [detailDueDate, setDetailDueDate] = useState("");
@@ -1014,6 +1023,22 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     useSensor(PointerSensor, { activationConstraint: Object.freeze({ distance: 4 }) }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
+
+  useEffect(() => {
+    if (taskContextMenu === null) return;
+    const dismiss = (event: globalThis.MouseEvent) => {
+      if (!(event.target instanceof Element) || !event.target.closest(".task-context-menu")) setTaskContextMenu(null);
+    };
+    const dismissOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setTaskContextMenu(null);
+    };
+    document.addEventListener("mousedown", dismiss);
+    document.addEventListener("keydown", dismissOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", dismiss);
+      document.removeEventListener("keydown", dismissOnEscape);
+    };
+  }, [taskContextMenu]);
 
   useEffect(() => { if (addingProject) projectCreateInputRef.current?.focus(); }, [addingProject]);
   useEffect(() => { if (addingSection) sectionCreateInputRef.current?.focus(); }, [addingSection]);
@@ -1780,6 +1805,17 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     toggleTask: toggleMutation.mutate,
     startEditing,
     openDetails,
+    openContextMenu: (task: TaskNode) => (event: ReactMouseEvent<HTMLElement>) => {
+      if (pageMode !== "tasks") return;
+      event.preventDefault();
+      const width = 196;
+      const height = 176;
+      setTaskContextMenu(Object.freeze({
+        task,
+        left: Math.max(8, Math.min(event.clientX, window.innerWidth - width - 8)),
+        top: Math.max(8, Math.min(event.clientY, window.innerHeight - height - 8))
+      }));
+    },
     startSubtask,
     startDragging,
     startMobileTaskDrag,
@@ -2247,6 +2283,15 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
         </div>
       ) : null}
     </main>
+    {taskContextMenu !== null ? createPortal(
+      <div className="task-context-menu" role="menu" aria-label={`Task actions for ${taskContextMenu.task.title}`} style={{ left: taskContextMenu.left, top: taskContextMenu.top }} onContextMenu={(event) => event.preventDefault()}>
+        <button type="button" role="menuitem" onClick={() => { const task = taskContextMenu.task; setTaskContextMenu(null); openDetails(task); }}>Open</button>
+        <button type="button" role="menuitem" onClick={() => { const task = taskContextMenu.task; setTaskContextMenu(null); startEditing(task); }}>Quick edit</button>
+        <button type="button" role="menuitem" onClick={() => { const task = taskContextMenu.task; setTaskContextMenu(null); startSubtask(task); }}>Add subtask</button>
+        <button type="button" role="menuitem" className="danger" onClick={() => { const task = taskContextMenu.task; setTaskContextMenu(null); requestTaskDelete(task); }}>Delete</button>
+      </div>,
+      document.body
+    ) : null}
     </DndContext>
   );
 };

@@ -495,6 +495,24 @@ describe("TaskApp", () => {
     await waitFor(() => expect(createTask).toHaveBeenCalledWith("Write outline", null, null, "task-1"));
   });
 
+  it("opens task actions from the right-click menu in Inbox", async () => {
+    renderApp(Object.freeze({ ...baseApi(Object.freeze([task({ id: "1", title: "Plan MVP" })])) }));
+
+    await screen.findByText("Plan MVP");
+    fireEvent.contextMenu(taskRow("Plan MVP"), { clientX: 120, clientY: 90 });
+
+    const menu = screen.getByRole("menu", { name: "Task actions for Plan MVP" });
+    expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "Open",
+      "Quick edit",
+      "Add subtask",
+      "Delete"
+    ]);
+
+    await userEvent.click(within(menu).getByRole("menuitem", { name: "Quick edit" }));
+    expect(screen.getByLabelText("Edit Plan MVP")).toHaveFocus();
+  });
+
   it("shows a created project from the create response", async () => {
     const createProject = vi.fn(async (title: string): Promise<Project> => project({ id: "project-1", title }));
 

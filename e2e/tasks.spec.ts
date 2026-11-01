@@ -5,6 +5,31 @@ test.beforeEach(async ({ page }) => {
   page.on("dialog", (dialog) => dialog.accept());
 });
 
+test("shows task context actions in Inbox and projects", async ({ page }, testInfo) => {
+  const inboxTitle = `Inbox context ${testInfo.workerIndex}-${Date.now()}`;
+  const projectTitle = `Project context ${testInfo.workerIndex}-${Date.now()}`;
+  const projectTaskTitle = `Project task ${testInfo.workerIndex}-${Date.now()}`;
+  await page.goto("/");
+  await createTask(page)(inboxTitle);
+
+  const inboxRow = page.locator(".task-row").filter({ has: page.getByRole("button", { name: inboxTitle, exact: true }) });
+  await inboxRow.click({ button: "right" });
+  const inboxMenu = page.getByRole("menu", { name: `Task actions for ${inboxTitle}` });
+  await expect(inboxMenu.getByRole("menuitem")).toHaveText(["Open", "Quick edit", "Add subtask", "Delete"]);
+  await inboxMenu.getByRole("menuitem", { name: "Open" }).click();
+  const details = page.getByRole("dialog", { name: `Task details: ${inboxTitle}` });
+  await expect(details).toBeVisible();
+  await details.getByRole("button", { name: "Close task details" }).click();
+
+  await createProject(page)(projectTitle);
+  await page.getByRole("button", { name: projectTitle, exact: true }).click();
+  await createTask(page)(projectTaskTitle);
+  const projectRow = page.locator(".task-row").filter({ has: page.getByRole("button", { name: projectTaskTitle, exact: true }) });
+  await projectRow.click({ button: "right" });
+  const projectMenu = page.getByRole("menu", { name: `Task actions for ${projectTaskTitle}` });
+  await expect(projectMenu.getByRole("menuitem")).toHaveText(["Open", "Quick edit", "Add subtask", "Delete"]);
+});
+
 const createTask = (page: Page) => async (title: string) => {
   await page.getByRole("button", { name: "Add task Q" }).click();
   await page.getByLabel("New task title").fill(title);
