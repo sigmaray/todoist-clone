@@ -1,5 +1,11 @@
 # Project Memory
 
+## 2026-10-30 — Allow passwords of any nonzero length
+
+- Removed minimum and maximum password-length checks from login, user creation, password updates, and account forms. Password inputs remain required for account creation; empty API/CLI password values are rejected, while omitted update passwords leave the existing password unchanged.
+- Updated Russian CLI examples and frontend validation copy. Added backend coverage for one-character passwords on account creation, login, and password reset, plus rejection of empty passwords; updated the Settings UI test to create a user with a one-character password.
+- Verification: `pnpm test` passes (79 tests), `pnpm build` passes, full Playwright E2E passes (23 tests) on a fresh database, and `git diff --check` passes.
+
 ## 2026-10-30 — Fix Supertest startup and run the complete suite
 
 - Backend tests now start their HTTP servers explicitly, wait for the `listening` event, and close servers after each test. Data-route tests log in as a test administrator; the no-password regression test still exercises unauthenticated access directly.

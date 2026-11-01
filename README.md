@@ -172,7 +172,7 @@ http://127.0.0.1:5173/tools/
 
 ```bash
 task dev:docker:users:list
-task dev:docker:users:update USERNAME=legacy-admin PASSWORD='длинный-пароль-от-12-символов'
+task dev:docker:users:update USERNAME=legacy-admin PASSWORD='пароль'
 ```
 
 После этого войдите в приложение под администратором. В разделе Settings администраторы могут создавать, изменять и удалять аккаунты; каждый пользователь видит только свои задачи, проекты и секции. В системе должен оставаться хотя бы один администратор.
@@ -180,9 +180,9 @@ task dev:docker:users:update USERNAME=legacy-admin PASSWORD='длинный-па
 Управление аккаунтами также доступно через CLI:
 
 ```bash
-task dev:docker:users:create USERNAME=sam PASSWORD='длинный-пароль'
-task dev:docker:users:create USERNAME=admin2 PASSWORD='длинный-пароль' ADMIN=true
-task dev:docker:users:update USERNAME=sam NAME=samuel PASSWORD='новый-длинный-пароль' ADMIN=false
+task dev:docker:users:create USERNAME=sam PASSWORD='пароль'
+task dev:docker:users:create USERNAME=admin2 PASSWORD='пароль' ADMIN=true
+task dev:docker:users:update USERNAME=sam NAME=samuel PASSWORD='новый-пароль' ADMIN=false
 task dev:docker:users:delete USERNAME=sam
 task dev:docker:users:list
 ```

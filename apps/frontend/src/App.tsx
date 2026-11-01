@@ -2470,18 +2470,18 @@ export const SettingsPage = ({ api }: Readonly<{ api: ApplicationApi }>) => {
             <h2>Users</h2>
             <form className="settings-credentials" onSubmit={(event) => { event.preventDefault(); createUser.mutate({ username: newUsername.trim().toLowerCase(), password: newPassword, isAdmin: newIsAdmin }); }}>
               <label>Username<input required maxLength={64} value={newUsername} onChange={(event) => setNewUsername(event.target.value)} /></label>
-              <label>Password<input required minLength={12} maxLength={128} type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /></label>
+              <label>Password<input required type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /></label>
               <label className="settings-checkbox"><input type="checkbox" checked={newIsAdmin} onChange={(event) => setNewIsAdmin(event.target.checked)} />Administrator</label>
               <button className="settings-save" type="submit" disabled={createUser.isPending}>Create user</button>
             </form>
-            {createUser.isError ? <p className="error" role="alert">Could not create user. Usernames must be unique and passwords at least 12 characters.</p> : null}
+            {createUser.isError ? <p className="error" role="alert">Could not create user. Usernames must be unique and passwords cannot be empty.</p> : null}
             {users.isLoading ? <p className="muted">Loading users…</p> : null}
             {users.isError ? <p className="error">Unable to load users.</p> : null}
             <div className="managed-users">{(users.data ?? []).map((user) => {
               const draft = userDrafts[user.id] ?? { username: user.username, password: "", isAdmin: user.isAdmin };
               return <form className="managed-user" key={user.id} onSubmit={(event) => { event.preventDefault(); updateUser.mutate({ id: user.id, patch: { username: draft.username.trim().toLowerCase(), isAdmin: draft.isAdmin, ...(draft.password ? { password: draft.password } : {}) } }); }}>
                 <label>Username<input required maxLength={64} value={draft.username} onChange={(event) => setUserDrafts((current) => ({ ...current, [user.id]: { ...draft, username: event.target.value } }))} /></label>
-                <label>New password<input minLength={12} maxLength={128} type="password" placeholder="Leave blank to keep" value={draft.password} onChange={(event) => setUserDrafts((current) => ({ ...current, [user.id]: { ...draft, password: event.target.value } }))} /></label>
+                <label>New password<input type="password" placeholder="Leave blank to keep" value={draft.password} onChange={(event) => setUserDrafts((current) => ({ ...current, [user.id]: { ...draft, password: event.target.value } }))} /></label>
                 <label className="settings-checkbox"><input type="checkbox" checked={draft.isAdmin} onChange={(event) => setUserDrafts((current) => ({ ...current, [user.id]: { ...draft, isAdmin: event.target.checked } }))} />Administrator</label>
                 <button type="submit" disabled={updateUser.isPending}>Save</button>
                 <button type="button" className="danger" disabled={deleteUser.isPending || (user.isAdmin && (users.data ?? []).filter((item) => item.isAdmin).length < 2)} onClick={() => { if (window.confirm(`Delete user ${user.username} and all their task data?`)) deleteUser.mutate(user.id); }}>Delete</button>

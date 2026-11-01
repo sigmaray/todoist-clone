@@ -379,6 +379,27 @@ describe("settings and session authentication", () => {
     await agent.delete("/users/legacy-admin").expect(409);
   });
 
+  it("accepts any non-empty password when creating users, updating passwords, and logging in", async () => {
+    const passwordHash = await hashPassword("administrator-password");
+    const userRepository = createMemoryUserRepository([Object.freeze({ id: "legacy-admin", username: "admin", passwordHash, isAdmin: true, confirmDelete: true, inboxDescription: "" })]);
+    const server = await createTestServer(createApp(createMemoryTaskRepository(), { userRepository }));
+    const admin = request.agent(server);
+    await admin.post("/auth/login").send({ username: "admin", password: "administrator-password" }).expect(200);
+
+    await admin.post("/users").send({ username: "empty", password: "" }).expect(400);
+    const created = await admin.post("/users").send({ username: "sam", password: "x" }).expect(201);
+    const sam = request.agent(server);
+    await sam.post("/auth/login").send({ username: "sam", password: "x" }).expect(200);
+    await admin.patch(`/users/${created.body.user.id}`).send({ password: "" }).expect(400);
+    await sam.get("/tasks").expect(200);
+    await admin.patch(`/users/${created.body.user.id}`).send({ password: "y" }).expect(200);
+    await sam.get("/tasks").expect(401);
+
+    const updatedPasswordLogin = request.agent(server);
+    await updatedPasswordLogin.post("/auth/login").send({ username: "sam", password: "y" }).expect(200);
+    await updatedPasswordLogin.get("/tasks").expect(200);
+  });
+
   it("keeps task data isolated by user", async () => {
     const passwordHash = await hashPassword("a-long-test-password");
     const userRepository = createMemoryUserRepository([Object.freeze({ id: "legacy-admin", username: "admin", passwordHash, isAdmin: true, confirmDelete: true, inboxDescription: "" })]);

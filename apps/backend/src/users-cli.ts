@@ -38,6 +38,7 @@ const run = async () => {
     if (existing === null) throw new Error("User not found");
     const nextAdmin = option("--admin");
     if (nextAdmin !== undefined && nextAdmin !== "true" && nextAdmin !== "false") throw new Error("--admin must be true or false");
+    if (option("--password") === "") throw new Error("Password must not be empty");
     if (existing.isAdmin && nextAdmin === "false" && (await users.list()).filter((user) => user.isAdmin).length < 2) throw new Error("Cannot remove the last administrator");
     const patch = {
       ...(option("--name") === undefined ? {} : { username: option("--name")!.trim().toLowerCase() }),

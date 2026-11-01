@@ -61,14 +61,14 @@ const patchSectionSchema = z.object({
 
 const loginSchema = z.object({
   username: z.string().trim().min(1).max(64),
-  password: z.string().min(1).max(256)
+  password: z.string().min(1)
 });
 
 const updateSettingsSchema = z.object({
   confirmDelete: z.boolean()
 });
-const createUserSchema = z.object({ username: z.string().trim().min(1).max(64), password: z.string().min(12).max(128), isAdmin: z.boolean().default(false) });
-const updateUserSchema = z.object({ username: z.string().trim().min(1).max(64).optional(), password: z.string().min(12).max(128).optional(), isAdmin: z.boolean().optional() }).refine((patch) => Object.keys(patch).length > 0);
+const createUserSchema = z.object({ username: z.string().trim().min(1).max(64), password: z.string().min(1), isAdmin: z.boolean().default(false) });
+const updateUserSchema = z.object({ username: z.string().trim().min(1).max(64).optional(), password: z.string().min(1).optional(), isAdmin: z.boolean().optional() }).refine((patch) => Object.keys(patch).length > 0);
 const inboxDescriptionSchema = z.object({ description: z.string().max(20000) });
 
 const parseJson = async (request: Request) => {

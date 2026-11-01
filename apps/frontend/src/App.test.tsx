@@ -1252,10 +1252,10 @@ describe("SettingsPage", () => {
 
     const usernames = await screen.findAllByLabelText("Username");
     await userEvent.type(usernames[0]!, "sam");
-    await userEvent.type(screen.getByLabelText("Password"), "a-long-test-password");
+    await userEvent.type(screen.getByLabelText("Password"), "x");
     await userEvent.click(screen.getByRole("button", { name: "Create user" }));
 
-    await waitFor(() => expect(createUser.mock.calls[0]?.[0]).toEqual({ username: "sam", password: "a-long-test-password", isAdmin: false }));
+    await waitFor(() => expect(createUser.mock.calls[0]?.[0]).toEqual({ username: "sam", password: "x", isAdmin: false }));
   });
 });
 
