@@ -443,6 +443,8 @@ h1 {
 .task-row {
   position: relative;
   display: grid;
+  --task-check-column: 24px;
+  --task-row-gap: 10px;
   grid-template-columns: 24px minmax(0, 1fr) auto auto auto auto;
   align-items: center;
   gap: 10px;
@@ -461,6 +463,26 @@ h1 {
   background: #fff8f5;
   box-shadow: 0 1px 0 #e5ded7;
 }
+
+.task-row.selection-selected { background: #fff3ed; box-shadow: inset 3px 0 #b44d2b; }
+.task-row.selection-mode { cursor: pointer; }
+.task-row.selection-mode > input[type="checkbox"],
+.task-row.selection-mode .task-action { visibility: hidden; pointer-events: none; }
+.task-content { position: relative; }
+.task-selection-indicator { position: absolute; left: calc(-1 * var(--task-row-gap) - (var(--task-check-column) + 18px) / 2); display: inline-grid; width: 18px; height: 18px; place-items: center; border: 1px solid #b8aaa0; border-radius: 4px; color: #fff; font-size: 12px; }
+.task-row.selection-selected .task-selection-indicator { border-color: #b44d2b; background: #b44d2b; }
+.selection-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 12px 0; padding: 10px 12px; border: 1px solid #ead8ce; border-radius: 10px; background: #fffaf7; }
+.selection-toolbar > span { margin-right: auto; color: #5e5149; font-weight: 600; }
+.selection-toolbar button { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 10px; border: 1px solid #d9cec5; border-radius: 7px; background: #fff; color: #292521; }
+.selection-toolbar button:disabled { opacity: .48; }
+.selection-toolbar button.danger { color: #a32d22; }
+.selection-move-backdrop { position: fixed; z-index: 2500; inset: 0; display: grid; place-items: center; padding: 16px; background: rgb(30 25 22 / .34); }
+.selection-move-dialog { display: grid; width: min(100%, 430px); gap: 12px; padding: 22px; border: 1px solid #e5ded7; border-radius: 14px; background: #fff; box-shadow: 0 20px 50px rgb(34 31 31 / .2); }
+.selection-move-dialog h2 { margin: 0; font-size: 1.2rem; }
+.selection-move-dialog select { min-height: 42px; padding: 8px 10px; border: 1px solid #cfc6be; border-radius: 7px; background: #fff; }
+.selection-move-dialog > div { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.selection-move-dialog > div button { min-height: 38px; padding: 7px 12px; border: 1px solid #d9cec5; border-radius: 7px; background: #fff; }
+.selection-move-dialog > div button.btn-primary { border-color: #b44d2b; background: #b44d2b; color: #fff; }
 
 .task-context-menu {
   position: fixed;
@@ -1230,6 +1252,8 @@ body {
 }
 
 .task-row {
+  --task-check-column: 18px;
+  --task-row-gap: 5px;
   grid-template-columns: 18px minmax(0, 1fr) auto auto auto;
   gap: 5px;
   min-height: 40px;
@@ -2010,7 +2034,7 @@ body {
   .header h1 { font-size: clamp(1.55rem, 7vw, 2rem); overflow-wrap: anywhere; }
   .task-header-actions { flex-wrap: wrap; }
   .task-header-actions button { min-height: 42px; }
-  .task-row { grid-template-columns: 36px minmax(0, 1fr) 36px 36px 36px; gap: 2px; min-height: 48px; }
+  .task-row { --task-check-column: 36px; --task-row-gap: 2px; grid-template-columns: 36px minmax(0, 1fr) 36px 36px 36px; gap: 2px; min-height: 48px; }
   .task-row > input[type="checkbox"] { width: 22px; height: 22px; margin-left: 6px; }
   .task-row .task-action { display: grid; place-items: center; min-width: 36px; min-height: 40px; padding: 6px; }
   .task-title { overflow-wrap: anywhere; }

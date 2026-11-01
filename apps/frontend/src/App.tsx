@@ -12,7 +12,7 @@ import {
 } from "@todoist-clone/domain";
 import type { Project, ProjectId, Section, SectionId, Task, TaskId, TaskNode } from "@todoist-clone/domain";
 import clsx from "clsx";
-import { Archive, CalendarDays, ChevronLeft, ChevronRight, ClipboardCopy, Code2, Copy, Database, Download, Edit3, Eye, GripVertical, Inbox, KeyRound, MessageSquare, MoreHorizontal, Menu, Plus, Search, Settings, Tag, Trash2, X } from "lucide-react";
+import { Archive, CalendarDays, ChevronLeft, ChevronRight, ClipboardCopy, Code2, Copy, Database, Download, Edit3, Eye, GripVertical, Inbox, KeyRound, MessageSquare, MoreHorizontal, Menu, MoveRight, Plus, Search, Settings, Tag, Trash2, X } from "lucide-react";
 import type { DragEvent, FormEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, ReactElement, PointerEvent as ReactPointerEvent, UIEvent } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -160,6 +160,9 @@ const renderTaskNodes = (
     startEditing: (task: TaskNode) => void;
     openDetails: (task: TaskNode) => void;
     openContextMenu: (task: TaskNode) => (event: ReactMouseEvent<HTMLElement>) => void;
+    selectionMode: boolean;
+    selectedTaskIds: ReadonlyArray<TaskId>;
+    toggleTaskSelection: (task: TaskNode) => void;
     deleteTask: (task: TaskNode) => void;
     startSubtask: (task: TaskNode) => void;
     submitSubtask: (task: TaskNode) => void;
@@ -196,6 +199,8 @@ const renderTaskNodes = (
         <div
           className={clsx(
             "task-row",
+            actions.selectionMode && "selection-mode",
+            actions.selectedTaskIds.includes(task.id) && "selection-selected",
             actions.draggingTaskId === task.id && "dragging",
             actions.activeDragTarget?.taskId === task.id && ["drag-target", `drag-${actions.activeDragTarget.placement}`]
           )}
@@ -210,6 +215,7 @@ const renderTaskNodes = (
           onDragLeave={actions.clearDragTarget}
           onDrop={actions.moveTaskOntoTask(task)}
           onKeyDown={actions.handleTaskKeys(task)}
+          onClick={() => { if (actions.selectionMode) actions.toggleTaskSelection(task); }}
           onContextMenu={actions.openContextMenu(task)}
           style={{ paddingLeft: `${depth * 1.25}rem` }}
         >
@@ -260,7 +266,7 @@ const renderTaskNodes = (
               </div>
             </form>
           ) : (
-            <div className="task-content"><button type="button" className="mobile-task-drag-handle" aria-label={`Drag task ${task.title}`} onPointerDown={actions.startMobileTaskDrag(task)} onPointerMove={actions.moveMobileDrag} onPointerUp={actions.finishMobileDrag} onPointerCancel={actions.cancelMobileDrag}><GripVertical size={16} aria-hidden="true" /></button><button type="button" className={task.completed ? "task-title completed" : "task-title"} onClick={() => actions.openDetails(task)}>{task.title}</button>{task.description.trim() ? <span className="task-description-preview" title={task.description}>{task.description}</span> : null}{task.dueDate || task.labels.length > 0 || task.comments.length > 0 ? <span className="task-meta-list">{task.dueDate ? <time className={taskDueDateTone(task.dueDate)} dateTime={task.dueDate} title={`Due ${task.dueDate}`}><CalendarDays size={14} aria-hidden="true" /><span>{isTaskDueToday(task.dueDate) ? "today" : task.dueDate}</span></time> : null}{task.labels.map((label) => <a className="task-label" key={label} href={`/labels?label=${encodeURIComponent(label)}`}>{label}</a>)}{task.comments.length > 0 ? <span className="task-comment-count" aria-label={`${task.comments.length} ${task.comments.length === 1 ? "comment" : "comments"}`} title={`${task.comments.length} ${task.comments.length === 1 ? "comment" : "comments"}`}><MessageSquare size={14} aria-hidden="true" /><span aria-hidden="true">{task.comments.length}</span></span> : null}</span> : null}</div>
+            <div className="task-content"><button type="button" className="mobile-task-drag-handle" aria-label={`Drag task ${task.title}`} onPointerDown={actions.startMobileTaskDrag(task)} onPointerMove={actions.moveMobileDrag} onPointerUp={actions.finishMobileDrag} onPointerCancel={actions.cancelMobileDrag}><GripVertical size={16} aria-hidden="true" /></button>{actions.selectionMode && depth === 0 ? <span className="task-selection-indicator" aria-hidden="true">{actions.selectedTaskIds.includes(task.id) ? "✓" : ""}</span> : null}<button type="button" className={task.completed ? "task-title completed" : "task-title"} aria-pressed={actions.selectionMode ? actions.selectedTaskIds.includes(task.id) : undefined} onClick={() => { if (!actions.selectionMode) actions.openDetails(task); }}>{task.title}</button>{task.description.trim() ? <span className="task-description-preview" title={task.description}>{task.description}</span> : null}{task.dueDate || task.labels.length > 0 || task.comments.length > 0 ? <span className="task-meta-list">{task.dueDate ? <time className={taskDueDateTone(task.dueDate)} dateTime={task.dueDate} title={`Due ${task.dueDate}`}><CalendarDays size={14} aria-hidden="true" /><span>{isTaskDueToday(task.dueDate) ? "today" : task.dueDate}</span></time> : null}{task.labels.map((label) => <a className="task-label" key={label} href={`/labels?label=${encodeURIComponent(label)}`}>{label}</a>)}{task.comments.length > 0 ? <span className="task-comment-count" aria-label={`${task.comments.length} ${task.comments.length === 1 ? "comment" : "comments"}`} title={`${task.comments.length} ${task.comments.length === 1 ? "comment" : "comments"}`}><MessageSquare size={14} aria-hidden="true" /><span aria-hidden="true">{task.comments.length}</span></span> : null}</span> : null}</div>
           )}
           <button type="button" className="task-action" aria-label={`Edit task ${task.title}`} onClick={() => actions.startEditing(task)}>
             <Edit3 size={14} aria-hidden="true" />
@@ -993,6 +999,10 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const [scopeExportOpen, setScopeExportOpen] = useState(false);
   const [detailsTaskId, setDetailsTaskId] = useState<TaskId | null>(null);
   const [taskContextMenu, setTaskContextMenu] = useState<TaskContextMenuState | null>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedRootTaskIds, setSelectedRootTaskIds] = useState<ReadonlyArray<TaskId>>(Object.freeze([]));
+  const [selectedMoveOpen, setSelectedMoveOpen] = useState(false);
+  const [selectedMovePlacement, setSelectedMovePlacement] = useState(inboxPlacement);
   const [detailTitle, setDetailTitle] = useState("");
   const [detailDescription, setDetailDescription] = useState("");
   const [detailDueDate, setDetailDueDate] = useState("");
@@ -1282,6 +1292,26 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     }
   });
 
+  const selectedMoveMutation = useMutation({
+    mutationFn: async (input: Readonly<{ taskIds: ReadonlyArray<TaskId>; projectId: ProjectId | null; sectionId: SectionId | null }>) => {
+      for (const taskId of input.taskIds) {
+        await api.moveTask(taskId, input.projectId, input.sectionId, null, null, null);
+      }
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: taskQueryKey });
+      clearSelection();
+    }
+  });
+
+  const selectedDeleteMutation = useMutation({
+    mutationFn: async (taskIds: ReadonlyArray<TaskId>) => Promise.all(taskIds.map((taskId) => api.deleteTask(taskId))),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: taskQueryKey });
+      clearSelection();
+    }
+  });
+
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
@@ -1372,9 +1402,19 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const moveDroppedTask = (projectId: ProjectId | null, sectionId: SectionId | null) => (event: DragEvent<HTMLElement>) => {
     event.preventDefault();
     const taskId = event.dataTransfer.getData("text/task-id");
+    const taskIdsJson = event.dataTransfer.getData("text/task-ids");
 
     if (taskId.length > 0) {
-      moveMutation.mutate(Object.freeze({ taskId, projectId, sectionId, parentId: null, beforeId: null, afterId: null }));
+      if (taskIdsJson.length > 0) {
+        try {
+          const taskIds = JSON.parse(taskIdsJson) as ReadonlyArray<TaskId>;
+          if (taskIds.length > 0) selectedMoveMutation.mutate(Object.freeze({ taskIds, projectId, sectionId }));
+        } catch {
+          moveMutation.mutate(Object.freeze({ taskId, projectId, sectionId, parentId: null, beforeId: null, afterId: null }));
+        }
+      } else {
+        moveMutation.mutate(Object.freeze({ taskId, projectId, sectionId, parentId: null, beforeId: null, afterId: null }));
+      }
     }
   };
 
@@ -1615,6 +1655,9 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     setDraggingTaskId(task.id);
     setActiveDropZone(null);
     event.dataTransfer.setData("text/task-id", task.id);
+    if (selectionMode && selectedRootTaskIds.includes(task.id)) {
+      event.dataTransfer.setData("text/task-ids", JSON.stringify(selectedRootTaskIds));
+    }
   };
 
   const moveTaskOntoTask = (target: TaskNode) => (event: DragEvent<HTMLElement>) => {
@@ -1622,6 +1665,16 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     event.stopPropagation();
 
     const taskId = event.dataTransfer.getData("text/task-id");
+    const taskIdsJson = event.dataTransfer.getData("text/task-ids");
+    if (taskIdsJson.length > 0) {
+      try {
+        const taskIds = JSON.parse(taskIdsJson) as ReadonlyArray<TaskId>;
+        selectedMoveMutation.mutate(Object.freeze({ taskIds, projectId: target.projectId, sectionId: target.sectionId }));
+        return;
+      } catch {
+        // Fall back to the existing single-task drop behavior for invalid payloads.
+      }
+    }
     const moved = findTaskNode(allTasks, taskId);
 
     if (moved === null || hasDescendant(moved, target.id)) {
@@ -1710,6 +1763,28 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
 
   const allTasks = tasks.data ?? Object.freeze([]);
   const flatTasks = flattenTaskNodes(allTasks);
+  const scopeRootTasks = allTasks.filter((task) => task.parentId === null && task.projectId === targetProjectId);
+  const selectedRootTasks = scopeRootTasks.filter((task) => selectedRootTaskIds.includes(task.id));
+  const collectSelectedTaskIds = (task: TaskNode): ReadonlyArray<TaskId> => Object.freeze([task.id, ...task.children.flatMap(collectSelectedTaskIds)]);
+  const selectedTaskIds = Object.freeze(selectedRootTasks.flatMap(collectSelectedTaskIds));
+  const clearSelection = () => {
+    setSelectionMode(false);
+    setSelectedRootTaskIds(Object.freeze([]));
+    setSelectedMoveOpen(false);
+  };
+  const rootTaskForSelection = (task: TaskNode): TaskNode => {
+    if (task.parentId === null) return task;
+    const parent = findTaskNode(allTasks, task.parentId);
+    return parent === null ? task : rootTaskForSelection(parent);
+  };
+  const toggleTaskSelection = (task: TaskNode) => {
+    if (!selectionMode) return;
+    const rootTask = rootTaskForSelection(task);
+    if (!scopeRootTasks.some((candidate) => candidate.id === rootTask.id)) return;
+    setSelectedRootTaskIds((current) => Object.freeze(current.includes(rootTask.id)
+      ? current.filter((id) => id !== rootTask.id)
+      : [...current, rootTask.id]));
+  };
   const availableLabels = normalizeLabels(flatTasks.flatMap((task) => task.labels));
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get("addTask") === "1") { setAddTaskPlacement(targetProjectId === null ? inboxPlacement : projectPlacement(targetProjectId)); setAddTaskOpen(true); window.history.replaceState({}, "", window.location.pathname); }
@@ -1805,6 +1880,9 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     toggleTask: toggleMutation.mutate,
     startEditing,
     openDetails,
+    selectionMode,
+    selectedTaskIds,
+    toggleTaskSelection,
     openContextMenu: (task: TaskNode) => (event: ReactMouseEvent<HTMLElement>) => {
       if (pageMode !== "tasks") return;
       event.preventDefault();
@@ -1862,6 +1940,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
         ? allProjects.find((project) => project.id === targetProjectId)?.title ?? "selected project"
         : "Inbox";
   const pageMode = currentPath === "/dates" ? "dates" : currentPath === "/labels" ? "labels" : currentPath === "/export" ? "export" : "tasks";
+  useEffect(() => { if (pageMode !== "tasks") clearSelection(); }, [pageMode]);
   const selectedLabel = new URLSearchParams(window.location.search).get("label") ?? "";
   const viewTasks = pageMode === "dates"
     ? filterTaskTree(allTasks, (task) => Boolean(task.dueDate))
@@ -1897,6 +1976,21 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
     await Promise.all(roots.map((task) => api.deleteTask(task.id)));
     await queryClient.invalidateQueries({ queryKey: taskQueryKey });
   };
+  const deleteSelectedTasks = () => {
+    if (selectedRootTasks.length === 0 || !confirmDeletion(`Delete ${selectedRootTasks.length} selected ${selectedRootTasks.length === 1 ? "task" : "tasks"} and all their subtasks?`)) return;
+    selectedDeleteMutation.mutate(Object.freeze(selectedRootTasks.map((task) => task.id)));
+  };
+  const moveSelectedTasks = () => {
+    if (selectedRootTasks.length === 0) return;
+    const placement = parsePlacement(selectedMovePlacement, allSections);
+    selectedMoveMutation.mutate(Object.freeze({ taskIds: Object.freeze(selectedRootTasks.map((task) => task.id)), ...placement }));
+  };
+  const selectionToolbar = selectionMode ? <div className="selection-toolbar" role="group" aria-label="Selected task actions">
+    <span role="status">{selectedRootTasks.length} selected</span>
+    <button type="button" className="danger" disabled={selectedRootTasks.length === 0 || selectedDeleteMutation.isPending} onClick={deleteSelectedTasks}><Trash2 size={15} aria-hidden="true" />Delete selected tasks</button>
+    <button type="button" disabled={selectedRootTasks.length === 0 || selectedMoveMutation.isPending} onClick={() => { setSelectedMovePlacement(targetProjectId === null ? inboxPlacement : projectPlacement(targetProjectId)); setSelectedMoveOpen(true); }}><MoveRight size={15} aria-hidden="true" />Move selected tasks</button>
+    <button type="button" onClick={clearSelection}>Cancel selection</button>
+  </div> : null;
 
   const finishDndDrag = (_event: DragEndEvent) => {
     setDraggingTaskId(null);
@@ -1958,7 +2052,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   return (
     <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={finishDndDrag}>
     <main className="shell app-layout">
-      <AppSidebar api={api} selectedProjectId={targetProjectId} onInboxSelect={() => { setTargetProjectId(null); setTargetSectionId(null); }} onProjectSelect={(id) => { setTargetProjectId(id); setTargetSectionId(null); }} onTaskSelect={(task) => { const node = findTaskNode(allTasks, task.id); if (node !== null) openDetails(node); }} onAddTask={() => openAddTaskDialog(pageMode === "tasks" ? (targetSectionId === null ? targetProjectId === null ? inboxPlacement : projectPlacement(targetProjectId) : sectionPlacement(targetSectionId)) : inboxPlacement)} isProjectDropActive={(id) => activeDropZone === (id === null ? inboxPlacement : projectPlacement(id))} onInboxDragEnter={markDropZone(null, null)} onInboxDragOver={markDropZone(null, null)} onInboxDragLeave={() => setActiveDropZone(null)} onInboxDrop={moveDroppedTask(null, null)} onProjectDragEnter={(id) => markDropZone(id, null)} onProjectDragOver={(id) => markDropZone(id, null)} onProjectDragLeave={() => () => setActiveDropZone(null)} onProjectDrop={(id) => moveDroppedTask(id, null)} />
+      <AppSidebar api={api} selectedProjectId={targetProjectId} onInboxSelect={() => { clearSelection(); setTargetProjectId(null); setTargetSectionId(null); }} onProjectSelect={(id) => { clearSelection(); setTargetProjectId(id); setTargetSectionId(null); }} onTaskSelect={(task) => { const node = findTaskNode(allTasks, task.id); if (node !== null) openDetails(node); }} onAddTask={() => openAddTaskDialog(pageMode === "tasks" ? (targetSectionId === null ? targetProjectId === null ? inboxPlacement : projectPlacement(targetProjectId) : sectionPlacement(targetSectionId)) : inboxPlacement)} isProjectDropActive={(id) => activeDropZone === (id === null ? inboxPlacement : projectPlacement(id))} onInboxDragEnter={markDropZone(null, null)} onInboxDragOver={markDropZone(null, null)} onInboxDragLeave={() => setActiveDropZone(null)} onInboxDrop={moveDroppedTask(null, null)} onProjectDragEnter={(id) => markDropZone(id, null)} onProjectDragOver={(id) => markDropZone(id, null)} onProjectDragLeave={() => () => setActiveDropZone(null)} onProjectDrop={(id) => moveDroppedTask(id, null)} />
       <button type="button" className="mobile-quick-add" aria-label="Quick add task" onClick={() => openAddTaskDialog(pageMode === "tasks" ? (targetSectionId === null ? targetProjectId === null ? inboxPlacement : projectPlacement(targetProjectId) : sectionPlacement(targetSectionId)) : inboxPlacement)}><Plus size={25} aria-hidden="true" /></button>
 
       <section className="workspace card shadow-sm" aria-label="Task manager">
@@ -1966,12 +2060,13 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
           <p className="eyebrow">Self-hosted MVP</p>
           <h1>{viewTitle}</h1>
           {pageMode === "tasks" ? <div className="task-header-actions">
+            {!selectionMode ? <button type="button" onClick={() => setSelectionMode(true)}>Select tasks</button> : null}
             <button type="button" className="scope-export-trigger btn-primary" onClick={() => setScopeExportOpen(true)}><Download size={16} aria-hidden="true" />Export</button>
             <button type="button" className="btn btn-outline-danger delete-all-tasks-button" disabled={!flatTasks.some((task) => task.parentId === null && task.projectId === targetProjectId)} onClick={() => void deleteAllTasks()}><Trash2 size={15} aria-hidden="true" />Delete all tasks</button>
           </div> : null}
         </header>
 
-
+        {pageMode === "tasks" ? selectionToolbar : null}
 
         {tasks.isLoading ? <p className="muted">Loading tasks...</p> : null}
         {tasks.isError ? <p className="error">Unable to load tasks.</p> : null}
@@ -2156,7 +2251,18 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
             })}
           </div>
         )}
+        {pageMode === "tasks" ? selectionToolbar : null}
       </section>
+      {selectedMoveOpen ? <div className="selection-move-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedMoveOpen(false); }}>
+        <section className="selection-move-dialog" role="dialog" aria-modal="true" aria-label="Move selected tasks" onKeyDown={(event) => { if (event.key === "Escape") setSelectedMoveOpen(false); }}>
+          <h2>Move {selectedRootTasks.length} selected {selectedRootTasks.length === 1 ? "task" : "tasks"}</h2>
+          <label htmlFor="selected-task-placement">Project, section, or Inbox</label>
+          <select id="selected-task-placement" aria-label="Move selected tasks to" value={selectedMovePlacement} onChange={(event) => setSelectedMovePlacement(event.target.value)}>
+            {createPlacementOptions(activeProjects, allSections.filter((section) => section.projectId === null || activeProjects.some((project) => project.id === section.projectId))).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+          <div><button type="button" onClick={() => setSelectedMoveOpen(false)}>Cancel</button><button type="button" className="btn-primary" disabled={selectedMoveMutation.isPending} onClick={moveSelectedTasks}>Move selected tasks</button></div>
+        </section>
+      </div> : null}
       {markdownModal !== null ? (
         <FloatingOverlay className={clsx("markdown-modal-backdrop", scopeExportOpen && "scope-preview-backdrop")} lockScroll>
           <FloatingFocusManager context={markdownFloating.context}>

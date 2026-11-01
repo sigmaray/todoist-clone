@@ -45,6 +45,35 @@ const createProject = (page: Page) => async (title: string) => {
   expect((await createdResponse).ok()).toBe(true);
 };
 
+test("moves a selected task group to a project with drag and drop", async ({ page }, testInfo) => {
+  const sourceTitle = `Group source ${testInfo.workerIndex}-${Date.now()}`;
+  const secondTitle = `Group second ${testInfo.workerIndex}-${Date.now()}`;
+  const projectTitle = `Group destination ${testInfo.workerIndex}-${Date.now()}`;
+  await page.goto("/");
+  await createTask(page)(sourceTitle);
+  await createTask(page)(secondTitle);
+  await createProject(page)(projectTitle);
+
+  await page.getByRole("button", { name: "Inbox", exact: true }).click();
+  const sourceTitleButton = page.getByRole("button", { name: sourceTitle, exact: true });
+  const titlePositionBefore = await sourceTitleButton.boundingBox();
+  await page.getByRole("button", { name: "Select tasks" }).click();
+  await sourceTitleButton.click();
+  await page.getByRole("button", { name: secondTitle, exact: true }).click();
+  const sourceRow = page.locator(".task-row").filter({ has: page.getByRole("button", { name: sourceTitle, exact: true }) });
+  const titlePositionAfter = await sourceTitleButton.boundingBox();
+  expect(titlePositionBefore?.x).toBe(titlePositionAfter?.x);
+  expect(await sourceRow.locator(".task-action").evaluateAll((actions) => actions.every((action) => getComputedStyle(action).visibility === "hidden"))).toBe(true);
+  await expect(sourceRow.locator("input[type='checkbox']")).toBeHidden();
+  await sourceRow.dragTo(page.locator(".project-nav-row").filter({ has: page.getByRole("button", { name: projectTitle, exact: true }) }).getByRole("button", { name: projectTitle, exact: true }));
+
+  await expect(page.getByRole("button", { name: sourceTitle, exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: secondTitle, exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: projectTitle, exact: true }).click();
+  await expect(page.getByRole("button", { name: sourceTitle, exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: secondTitle, exact: true })).toBeVisible();
+});
+
 const dragProjectTo = (page: Page) => async (sourceTitle: string, targetTitle: string, yRatio: number) => {
   await page.locator(".project-nav-row").filter({ has: page.getByRole("button", { name: sourceTitle, exact: true }) }).evaluate((source, data) => {
     const target = [...document.querySelectorAll<HTMLElement>(".project-nav-row")].find((row) => row.querySelector("button.nav-button")?.textContent?.trim() === data.targetTitle);

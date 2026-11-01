@@ -513,6 +513,73 @@ describe("TaskApp", () => {
     expect(screen.getByLabelText("Edit Plan MVP")).toHaveFocus();
   });
 
+  it("selects the root task when clicking anywhere in its subtree", async () => {
+    renderApp(Object.freeze({
+      ...baseApi(Object.freeze([task({ id: "root", title: "Parent", children: Object.freeze([task({ id: "child", title: "Child", parentId: "root", children: Object.freeze([task({ id: "grandchild", title: "Grandchild", parentId: "child" })]) })]) })]))
+    }));
+
+    await screen.findByText("Parent");
+    await userEvent.click(screen.getByRole("button", { name: "Select tasks" }));
+    await userEvent.click(taskRow("Child"));
+    expect(screen.getByRole("button", { name: "Parent" })).toHaveAttribute("aria-pressed", "true");
+    expect(taskRow("Parent")).toHaveClass("selection-selected");
+    expect(taskRow("Child")).toHaveClass("selection-selected");
+    expect(taskRow("Grandchild")).toHaveClass("selection-selected");
+    expect(taskRow("Parent")).toHaveClass("selection-mode");
+
+    await userEvent.click(taskRow("Grandchild"));
+    expect(screen.queryByRole("dialog", { name: "Task details: Child" })).not.toBeInTheDocument();
+    expect(screen.getAllByText("0 selected")).toHaveLength(2);
+
+    await userEvent.click(taskRow("Parent"));
+    expect(taskRow("Child")).toHaveClass("selection-selected");
+    await userEvent.click(taskRow("Parent"));
+    expect(taskRow("Child")).not.toHaveClass("selection-selected");
+  });
+
+  it("moves selected top-level tasks and cancels selection", async () => {
+    const moveTask = vi.fn(async (id: string, projectId: string | null, sectionId: string | null, parentId: string | null): Promise<Task> => task({ id, title: "Moved", projectId, sectionId, parentId }));
+    renderApp(Object.freeze({
+      ...baseApi(Object.freeze([task({ id: "root", title: "Parent", children: Object.freeze([task({ id: "child", title: "Child", parentId: "root" })]) })])),
+      listProjects: async () => Object.freeze([project({ id: "project-1", title: "Roadmap" })]),
+      moveTask
+    }));
+
+    await screen.findByText("Parent");
+    await userEvent.click(screen.getByRole("button", { name: "Select tasks" }));
+    await userEvent.click(screen.getByRole("button", { name: "Parent" }));
+    await userEvent.click(screen.getAllByRole("button", { name: "Move selected tasks" })[0]!);
+    const dialog = screen.getByRole("dialog", { name: "Move selected tasks" });
+    await userEvent.selectOptions(within(dialog).getByLabelText("Move selected tasks to"), "project:project-1");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Move selected tasks" }));
+
+    await waitFor(() => expect(moveTask).toHaveBeenCalledTimes(1));
+    expect(moveTask).toHaveBeenCalledWith("root", "project-1", null, null, null, null);
+    expect(screen.queryByRole("group", { name: "Selected task actions" })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Select tasks" }));
+    await userEvent.click(screen.getByRole("button", { name: "Parent" }));
+    await userEvent.click(screen.getAllByRole("button", { name: "Cancel selection" })[0]!);
+    expect(screen.queryByRole("group", { name: "Selected task actions" })).not.toBeInTheDocument();
+  });
+
+  it("deletes selected roots with the existing confirmation and their subtasks", async () => {
+    const deleteTask = vi.fn(async () => undefined);
+    renderApp(Object.freeze({
+      ...baseApi(Object.freeze([task({ id: "root", title: "Parent", children: Object.freeze([task({ id: "child", title: "Child", parentId: "root" })]) })])),
+      deleteTask
+    }));
+
+    await screen.findByText("Parent");
+    await userEvent.click(screen.getByRole("button", { name: "Select tasks" }));
+    await userEvent.click(screen.getByRole("button", { name: "Parent" }));
+    await userEvent.click(screen.getAllByRole("button", { name: "Delete selected tasks" })[0]!);
+
+    expect(window.confirm).toHaveBeenCalledWith("Delete 1 selected task and all their subtasks?");
+    await waitFor(() => expect(deleteTask).toHaveBeenCalledTimes(1));
+    expect(deleteTask).toHaveBeenCalledWith("root");
+  });
+
   it("shows a created project from the create response", async () => {
     const createProject = vi.fn(async (title: string): Promise<Project> => project({ id: "project-1", title }));
 

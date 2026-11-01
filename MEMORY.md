@@ -1,5 +1,23 @@
 # Project Memory
 
+## 2026-11-01 — Keep task titles aligned in selection mode
+
+- Fixed horizontal movement of task titles when entering selection mode: hidden task actions and completion checkboxes retain their grid space, and the selection marker is positioned outside the content flow.
+- Added a Playwright assertion that compares the title's horizontal coordinate before and after enabling selection mode.
+- Verification: `pnpm test` passes (83 tests), `pnpm build`, full Playwright E2E (25 tests), and `git diff --check` pass.
+
+## 2026-11-01 — Improve task selection interactions
+
+- In selection mode, clicking any task row, including a child task, now toggles its top-level parent and the full subtree. The whole row is the target. Completion checkboxes and per-task action buttons are hidden while selecting.
+- Added frontend coverage for child-to-root selection and updated E2E coverage to verify action controls are hidden during group drag.
+- Verification: `pnpm test` passes (83 tests), `pnpm build`, full Playwright E2E (25 tests on an isolated database), and `git diff --check` pass.
+
+## 2026-11-01 — Add task selection mode and bulk actions
+
+- Added a selection mode for Inbox and project task lists. Only top-level tasks can be toggled; selecting one marks its entire nested tree. Selection clears when leaving task views or changing scope.
+- Added top and bottom action bars, confirmation based bulk deletion, a destination picker for Inbox/projects/sections, and drag-and-drop of the selected group to Inbox, a project, a section, or another task's scope. Group moves call the existing move API for selected roots, preserving the parent-child links.
+- Verification: `pnpm test` passes (83 tests), `pnpm build` and `git diff --check` pass. Full Playwright suite passes (25 tests) on a fresh isolated database. Runs against the shared, accumulated E2E database had 8 unrelated timeouts; rerunning fresh was green.
+
 ## 2026-11-01 — Add right-click task actions
 
 - Added a right-click context menu to task rows in Inbox and project views with Open, Quick edit, Add subtask, and Delete. The menu uses the existing task handlers, closes on outside click or Escape, and stays within the viewport.
