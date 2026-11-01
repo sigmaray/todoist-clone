@@ -1,5 +1,11 @@
 # Project Memory
 
+## 2026-11-01 — Add task selection button styling and shortcuts
+
+- Styled Select tasks with Bootstrap's outlined secondary button and a list/check icon. The S physical key toggles selection regardless of keyboard layout, ignores text inputs and modifier shortcuts, and Escape exits selection mode.
+- Added UI and E2E coverage for the S key in Russian layout, Escape, Bootstrap styling, and the button icon.
+- Verification: `pnpm test` passes (84 tests), `pnpm build`, full Playwright E2E (26 tests on a fresh isolated database), and `git diff --check` pass.
+
 ## 2026-11-01 — Keep task titles aligned in selection mode
 
 - Fixed horizontal movement of task titles when entering selection mode: hidden task actions and completion checkboxes retain their grid space, and the selection marker is positioned outside the content flow.

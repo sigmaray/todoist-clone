@@ -537,6 +537,20 @@ describe("TaskApp", () => {
     expect(taskRow("Child")).not.toHaveClass("selection-selected");
   });
 
+  it("toggles selection mode with the S key in any keyboard layout and exits with Escape", async () => {
+    renderApp(Object.freeze({ ...baseApi(Object.freeze([task({ id: "root", title: "Parent" })])) }));
+
+    await screen.findByText("Parent");
+    fireEvent.keyDown(document, { key: "ы", code: "KeyS" });
+    expect(taskRow("Parent")).toHaveClass("selection-mode");
+
+    fireEvent.keyDown(document, { key: "Escape", code: "Escape" });
+    expect(taskRow("Parent")).not.toHaveClass("selection-mode");
+
+    fireEvent.keyDown(document, { key: "s", code: "KeyS" });
+    expect(taskRow("Parent")).toHaveClass("selection-mode");
+  });
+
   it("moves selected top-level tasks and cancels selection", async () => {
     const moveTask = vi.fn(async (id: string, projectId: string | null, sectionId: string | null, parentId: string | null): Promise<Task> => task({ id, title: "Moved", projectId, sectionId, parentId }));
     renderApp(Object.freeze({

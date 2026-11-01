@@ -1133,6 +1133,7 @@ body {
 .delete-all-tasks-button { display: inline-flex; align-items: center; gap: 6px; }
 .task-header-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 0; }
 .task-header-actions > button { min-height: 38px; }
+.task-header-actions .select-tasks-button { display: inline-flex; align-items: center; gap: 6px; }
 .task-scope-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
 .task-scope-heading h2 { margin: 0; color: #333; font-size: 16px; font-weight: 650; }
 .scope-add-task-button { display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 6px; padding: 6px 8px; color: #c83a2d; background: transparent; font: inherit; cursor: pointer; }

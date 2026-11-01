@@ -57,7 +57,10 @@ test("moves a selected task group to a project with drag and drop", async ({ pag
   await page.getByRole("button", { name: "Inbox", exact: true }).click();
   const sourceTitleButton = page.getByRole("button", { name: sourceTitle, exact: true });
   const titlePositionBefore = await sourceTitleButton.boundingBox();
-  await page.getByRole("button", { name: "Select tasks" }).click();
+  const selectTasksButton = page.getByRole("button", { name: "Select tasks" });
+  await expect(selectTasksButton).toHaveClass(/btn-outline-secondary/);
+  await expect(selectTasksButton.locator("svg")).toBeVisible();
+  await selectTasksButton.click();
   await sourceTitleButton.click();
   await page.getByRole("button", { name: secondTitle, exact: true }).click();
   const sourceRow = page.locator(".task-row").filter({ has: page.getByRole("button", { name: sourceTitle, exact: true }) });
@@ -72,6 +75,18 @@ test("moves a selected task group to a project with drag and drop", async ({ pag
   await page.getByRole("button", { name: projectTitle, exact: true }).click();
   await expect(page.getByRole("button", { name: sourceTitle, exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: secondTitle, exact: true })).toBeVisible();
+});
+
+test("toggles task selection with S in any layout and exits with Escape", async ({ page }, testInfo) => {
+  const title = `Selection shortcut ${testInfo.workerIndex}-${Date.now()}`;
+  await page.goto("/");
+  await createTask(page)(title);
+  const row = page.locator(".task-row").filter({ has: page.getByRole("button", { name: title, exact: true }) });
+
+  await page.evaluate(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "ы", code: "KeyS", bubbles: true })));
+  await expect(row).toHaveClass(/selection-mode/);
+  await page.keyboard.press("Escape");
+  await expect(row).not.toHaveClass(/selection-mode/);
 });
 
 const dragProjectTo = (page: Page) => async (sourceTitle: string, targetTitle: string, yRatio: number) => {

@@ -12,7 +12,7 @@ import {
 } from "@todoist-clone/domain";
 import type { Project, ProjectId, Section, SectionId, Task, TaskId, TaskNode } from "@todoist-clone/domain";
 import clsx from "clsx";
-import { Archive, CalendarDays, ChevronLeft, ChevronRight, ClipboardCopy, Code2, Copy, Database, Download, Edit3, Eye, GripVertical, Inbox, KeyRound, MessageSquare, MoreHorizontal, Menu, MoveRight, Plus, Search, Settings, Tag, Trash2, X } from "lucide-react";
+import { Archive, CalendarDays, ChevronLeft, ChevronRight, ClipboardCopy, Code2, Copy, Database, Download, Edit3, Eye, GripVertical, Inbox, KeyRound, ListChecks, MessageSquare, MoreHorizontal, Menu, MoveRight, Plus, Search, Settings, Tag, Trash2, X } from "lucide-react";
 import type { DragEvent, FormEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, ReactElement, PointerEvent as ReactPointerEvent, UIEvent } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -1941,6 +1941,26 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
         : "Inbox";
   const pageMode = currentPath === "/dates" ? "dates" : currentPath === "/labels" ? "labels" : currentPath === "/export" ? "export" : "tasks";
   useEffect(() => { if (pageMode !== "tasks") clearSelection(); }, [pageMode]);
+  useEffect(() => {
+    const handleSelectionKeys = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        if (selectionMode) {
+          event.preventDefault();
+          clearSelection();
+        }
+        return;
+      }
+      if (event.repeat) return;
+      const target = event.target;
+      const typing = target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+      if (event.code !== "KeyS" || typing || event.ctrlKey || event.metaKey || event.altKey) return;
+      event.preventDefault();
+      if (selectionMode) clearSelection();
+      else setSelectionMode(true);
+    };
+    document.addEventListener("keydown", handleSelectionKeys);
+    return () => document.removeEventListener("keydown", handleSelectionKeys);
+  }, [selectionMode]);
   const selectedLabel = new URLSearchParams(window.location.search).get("label") ?? "";
   const viewTasks = pageMode === "dates"
     ? filterTaskTree(allTasks, (task) => Boolean(task.dueDate))
@@ -2060,7 +2080,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
           <p className="eyebrow">Self-hosted MVP</p>
           <h1>{viewTitle}</h1>
           {pageMode === "tasks" ? <div className="task-header-actions">
-            {!selectionMode ? <button type="button" onClick={() => setSelectionMode(true)}>Select tasks</button> : null}
+            {!selectionMode ? <button type="button" className="btn btn-outline-secondary select-tasks-button" onClick={() => setSelectionMode(true)}><ListChecks size={16} aria-hidden="true" />Select tasks</button> : null}
             <button type="button" className="scope-export-trigger btn-primary" onClick={() => setScopeExportOpen(true)}><Download size={16} aria-hidden="true" />Export</button>
             <button type="button" className="btn btn-outline-danger delete-all-tasks-button" disabled={!flatTasks.some((task) => task.parentId === null && task.projectId === targetProjectId)} onClick={() => void deleteAllTasks()}><Trash2 size={15} aria-hidden="true" />Delete all tasks</button>
           </div> : null}
