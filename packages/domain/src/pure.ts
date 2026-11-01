@@ -183,3 +183,48 @@ export const renderTaskMarkdownDocument = (
     ""
   ].join("\n");
 };
+
+const quoteMarkdownText = (value: string, prefix: string): ReadonlyArray<string> =>
+  Object.freeze(value.split("\n").map((line) => `${prefix}> ${line}`));
+
+const renderAdvancedTaskMarkdown = (task: TaskNode, depth: number): ReadonlyArray<string> => {
+  const indent = "  ".repeat(depth);
+  const detailPrefix = `${indent}  `;
+  const details = [
+    ...(task.description.length > 0 ? quoteMarkdownText(`**Description:** ${task.description}`, detailPrefix) : []),
+    ...(task.dueDate === null ? [] : [`${detailPrefix}> **Due date:** ${task.dueDate}`]),
+    ...(task.labels.length === 0 ? [] : [`${detailPrefix}> **Labels:** ${task.labels.map((label) => `\`${label}\``).join(", ")}`]),
+    ...(task.comments.length === 0 ? [] : [
+      `${detailPrefix}> **Comments:**`,
+      ...task.comments.flatMap((comment) => quoteMarkdownText(`- ${comment.createdAt} — ${comment.body}`, detailPrefix))
+    ]),
+    ...task.children.flatMap((child) => renderAdvancedTaskMarkdown(child, depth + 1))
+  ];
+  return Object.freeze([`${indent}- [${checkbox(task.completed)}] ${task.title}`, ...details]);
+};
+
+export const renderAdvancedMarkdownDocument = (
+  title: string,
+  tasks: ReadonlyArray<TaskNode>,
+  sections: ReadonlyArray<Readonly<{ title: string; tasks: ReadonlyArray<TaskNode>; description?: string }>> = Object.freeze([]),
+  description = ""
+): string => {
+  const body = [
+    ...(description.length > 0 ? quoteMarkdownText(`**Description:** ${description}`, "") : []),
+    ...tasks.flatMap((task) => renderAdvancedTaskMarkdown(task, 0))
+  ];
+  const sectionContent = sections.flatMap((section, index) => [
+    ...(body.length > 0 || index > 0 ? [""] : []),
+    `## ${section.title}`,
+    "",
+    ...(section.description ? quoteMarkdownText(`**Description:** ${section.description}`, "") : []),
+    ...(section.tasks.length > 0 ? section.tasks.flatMap((task) => renderAdvancedTaskMarkdown(task, 0)) : ["_No tasks._"])
+  ]);
+  return [
+    `# ${title}`,
+    "",
+    ...(body.length > 0 ? body : sections.length === 0 ? ["_No tasks._"] : []),
+    ...sectionContent,
+    ""
+  ].join("\n");
+};

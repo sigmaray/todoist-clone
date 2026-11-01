@@ -5,6 +5,7 @@ import {
   computeIndentPlacement,
   computeOutdentPlacement,
   generateLexicalOrder,
+  renderAdvancedMarkdownDocument,
   renderTaskMarkdownDocument
 } from "./pure";
 import type { Task } from "./types";
@@ -151,5 +152,32 @@ describe("renderTaskMarkdownDocument", () => {
     const markdown = renderTaskMarkdownDocument("Project", root, [{ title: "Planning", tasks: section }]);
     expect(markdown).toBe(["# Project", "", "- [ ] Root task", "", "## Planning", "", "- [ ] Section task", ""].join("\n"));
     expect(markdown.match(/^# /gm)).toHaveLength(1);
+  });
+});
+
+describe("renderAdvancedMarkdownDocument", () => {
+  it("includes task descriptions, dates, labels, comments, and scope descriptions", () => {
+    const tree = buildTaskTree([task({
+      id: "rich-task",
+      title: "Write release notes",
+      lexicalOrder: "a",
+      description: "Mention the new search\nand export formats",
+      dueDate: "2026-11-12",
+      labels: Object.freeze(["release", "writing"]),
+      comments: Object.freeze([Object.freeze({ id: "comment-1", body: "Include screenshots", createdAt: "2026-11-01T12:00:00.000Z" })])
+    })]);
+
+    expect(renderAdvancedMarkdownDocument("Inbox", tree, [], "Personal notes")).toContain([
+      "# Inbox",
+      "",
+      "> **Description:** Personal notes",
+      "- [ ] Write release notes",
+      "  > **Description:** Mention the new search",
+      "  > and export formats",
+      "  > **Due date:** 2026-11-12",
+      "  > **Labels:** `release`, `writing`",
+      "  > **Comments:**",
+      "  > - 2026-11-01T12:00:00.000Z — Include screenshots"
+    ].join("\n"));
   });
 });

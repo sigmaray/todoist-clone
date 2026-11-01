@@ -614,6 +614,10 @@ test("creates projects, sections, subtasks, and exports markdown", async ({ cont
   expect(projectMarkdown).toContain(`## ${projectSection}`);
   await page.getByRole("button", { name: "Close" }).click();
   await expect(page.getByRole("dialog", { name: "Export options" })).toBeVisible();
+  await page.getByRole("button", { name: "Preview advanced markdown" }).click();
+  const advancedProjectPreview = page.getByRole("dialog", { name: "Advanced markdown preview" });
+  await expect(advancedProjectPreview).toContainText(projectTask);
+  await page.getByRole("button", { name: "Close" }).click();
   await page.getByRole("button", { name: "Close export options" }).click();
 
   await page.getByRole("button", { name: "Inbox" }).click();
@@ -686,6 +690,9 @@ test("creates projects, sections, subtasks, and exports markdown", async ({ cont
   await page.getByRole("button", { name: "Copy markdown" }).click();
   await expect(page.locator('.export-options-modal [role="status"]')).toHaveText("Markdown copied");
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain(inboxTask);
+  await page.getByRole("button", { name: "Copy advanced markdown" }).click();
+  await expect(page.locator('.export-options-modal [role="status"]')).toHaveText("Advanced markdown copied");
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain(inboxTask);
   await page.getByRole("button", { name: "Close export options" }).click();
 
   await page.getByRole("link", { name: "Export", exact: true }).click();
@@ -694,6 +701,9 @@ test("creates projects, sections, subtasks, and exports markdown", async ({ cont
   const markdownDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export all markdown" }).click();
   expect((await markdownDownload).suggestedFilename()).toBe("todoist-clone.md");
+  const advancedMarkdownDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export all advanced markdown" }).click();
+  expect((await advancedMarkdownDownload).suggestedFilename()).toBe("todoist-clone-advanced.md");
   const jsonDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export all JSON" }).click();
   expect((await jsonDownload).suggestedFilename()).toBe("todoist-clone.json");

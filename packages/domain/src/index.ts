@@ -5,6 +5,7 @@ export {
   computeIndentPlacement,
   computeOutdentPlacement,
   generateLexicalOrder,
+  renderAdvancedMarkdownDocument,
   renderTaskMarkdownDocument
 } from "./pure";
 export type { DropPosition, TaskPlacement } from "./pure";

@@ -1126,6 +1126,13 @@ describe("TaskApp", () => {
     expect(jsonText).not.toContain("Inbox only");
     fireEvent.keyDown(jsonDialog, { key: "Escape" });
     expect(screen.getByRole("dialog", { name: "Export options" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Preview advanced markdown" }));
+    const advancedMarkdown = screen.getByRole("dialog", { name: "Advanced markdown preview" }).querySelector("pre")?.textContent ?? "";
+    expect(advancedMarkdown).toContain("**Description:** Roadmap details");
+    expect(advancedMarkdown).toContain("**Description:** Detailed project note");
+    expect(advancedMarkdown).toContain("**Due date:** 2026-12-04");
+    expect(advancedMarkdown).toContain("**Labels:** `planning`");
+    expect(advancedMarkdown).toContain("Project comment");
   });
 
   it("exports a complete JSON document and previews all Markdown on the Export page", async () => {
@@ -1153,6 +1160,16 @@ describe("TaskApp", () => {
     await userEvent.click(screen.getByRole("button", { name: "Preview all markdown" }));
     expect(await screen.findByRole("dialog", { name: "Markdown preview" })).toBeInTheDocument();
     expect(screen.getByText(/- \[ \] All tasks note/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    await userEvent.click(screen.getByRole("button", { name: "Preview all advanced markdown" }));
+    const advancedDialog = await screen.findByRole("dialog", { name: "Advanced markdown preview" });
+    const advancedText = advancedDialog.querySelector("pre")?.textContent ?? "";
+    expect(advancedText).toContain("**Description:** Inbox description");
+    expect(advancedText).toContain("**Description:** Task description");
+    expect(advancedText).toContain("**Due date:** 2026-11-18");
+    expect(advancedText).toContain("**Labels:** `important`");
+    expect(advancedText).toContain("Task comment");
     await userEvent.click(screen.getByRole("button", { name: "Close" }));
 
     await userEvent.click(screen.getByRole("button", { name: "Preview all JSON" }));
@@ -1317,7 +1334,7 @@ describe("SearchPalette", () => {
     expect(await screen.findByRole("dialog", { name: "Task details: Prepare launch" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Close task details" }));
 
-    fireEvent.keyDown(document.body, { key: "k", ctrlKey: true, bubbles: true });
+    fireEvent.keyDown(document.body, { key: "л", code: "KeyK", ctrlKey: true, bubbles: true });
     await userEvent.type(screen.getByRole("textbox", { name: "Search or type a command" }), "work");
     expect(await screen.findByRole("link", { name: /^work$/ })).toHaveAttribute("href", "/labels?label=work");
   });

@@ -1,5 +1,12 @@
 # Project Memory
 
+## 2026-11-01 — Make Ctrl+K layout independent and add advanced Markdown exports
+
+- Search now recognizes the physical `KeyK` code with Ctrl/Cmd, including non-English keyboard layouts.
+- Added a domain renderer for advanced Markdown that includes scope descriptions, task descriptions, due dates, labels, and timestamped comments. Added preview/copy for Inbox and project scopes and download/preview/copy on `/export`.
+- Added unit, frontend, and E2E coverage for Russian-layout Ctrl+K and advanced Markdown content/actions.
+- Verification: `pnpm test` passes (87 tests), `pnpm build` passes, full Playwright E2E passes (27 tests) on a fresh isolated database, and `git diff --check` passes.
+
 ## 2026-11-01 — Move user CRUD to the admin page and add self-service account updates
 
 - Moved administrator user creation, editing, role changes, and deletion from `/settings` to `/admin/users`; the route and sidebar link require an administrator session.

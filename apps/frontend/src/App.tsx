@@ -8,6 +8,7 @@ import {
   computeDropPlacement,
   computeIndentPlacement,
   computeOutdentPlacement,
+  renderAdvancedMarkdownDocument,
   renderTaskMarkdownDocument
 } from "@todoist-clone/domain";
 import type { Project, ProjectId, Section, SectionId, Task, TaskId, TaskNode } from "@todoist-clone/domain";
@@ -520,7 +521,7 @@ const SearchPalette = ({ tasks, projects = Object.freeze([]), sections = Object.
 
   useEffect(() => {
     const handleShortcut = (event: globalThis.KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+      if ((event.ctrlKey || event.metaKey) && (event.code === "KeyK" || event.key.toLowerCase() === "k")) {
         event.preventDefault();
         setOpen(true);
       } else if (event.key === "Escape") {
@@ -607,6 +608,22 @@ const currentMarkdown = (
   );
 };
 
+const currentAdvancedMarkdown = (
+  title: string,
+  sections: ReadonlyArray<Section>,
+  allTasks: ReadonlyArray<TaskNode>,
+  targetProjectId: ProjectId | null,
+  description: string
+) => renderAdvancedMarkdownDocument(
+  title,
+  allTasks.filter((task) => task.projectId === targetProjectId && task.sectionId === null),
+  sections.filter((section) => section.projectId === targetProjectId).map((section) => Object.freeze({
+    title: section.title,
+    tasks: allTasks.filter((task) => task.projectId === targetProjectId && task.sectionId === section.id)
+  })),
+  description
+);
+
 const allMarkdownDocument = (
   projects: ReadonlyArray<Project>,
   sections: ReadonlyArray<Section>,
@@ -619,6 +636,26 @@ const allMarkdownDocument = (
   })),
   ...projects.flatMap((project) => [
     Object.freeze({ title: project.title, tasks: tasks.filter((task) => task.projectId === project.id && task.sectionId === null) }),
+    ...sections.filter((section) => section.projectId === project.id).map((section) => Object.freeze({
+      title: `${project.title} / ${section.title}`,
+      tasks: tasks.filter((task) => task.projectId === project.id && task.sectionId === section.id)
+    }))
+  ])
+]);
+
+const allAdvancedMarkdownDocument = (
+  projects: ReadonlyArray<Project>,
+  sections: ReadonlyArray<Section>,
+  tasks: ReadonlyArray<TaskNode>,
+  inboxDescription: string
+) => renderAdvancedMarkdownDocument("All tasks", [], [
+  Object.freeze({ title: "Inbox", description: inboxDescription, tasks: tasks.filter((task) => task.projectId === null && task.sectionId === null) }),
+  ...sections.filter((section) => section.projectId === null).map((section) => Object.freeze({
+    title: `Inbox / ${section.title}`,
+    tasks: tasks.filter((task) => task.projectId === null && task.sectionId === section.id)
+  })),
+  ...projects.flatMap((project) => [
+    Object.freeze({ title: project.title, description: project.description, tasks: tasks.filter((task) => task.projectId === project.id && task.sectionId === null) }),
     ...sections.filter((section) => section.projectId === project.id).map((section) => Object.freeze({
       title: `${project.title} / ${section.title}`,
       tasks: tasks.filter((task) => task.projectId === project.id && task.sectionId === section.id)
@@ -997,7 +1034,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const [editTaskId, setEditTaskId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [editPlacement, setEditPlacement] = useState(inboxPlacement);
-  const [markdownModal, setMarkdownModal] = useState<Readonly<{ title: string; markdown: string; format?: "markdown" | "json" }> | null>(null);
+  const [markdownModal, setMarkdownModal] = useState<Readonly<{ title: string; markdown: string; format?: "markdown" | "advanced-markdown" | "json" }> | null>(null);
   const [scopeExportOpen, setScopeExportOpen] = useState(false);
   const [detailsTaskId, setDetailsTaskId] = useState<TaskId | null>(null);
   const [taskContextMenu, setTaskContextMenu] = useState<TaskContextMenuState | null>(null);
@@ -2050,6 +2087,8 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
   const scopeTasks = flatTasks.filter((task) => task.projectId === targetProjectId);
   const scopeTaskTree = filterTaskTree(allTasks, (task) => task.projectId === targetProjectId);
   const scopeDescription = targetProjectId === null ? inboxDescriptionQuery.data ?? "" : scopeProject?.description ?? "";
+  const advancedMarkdown = currentAdvancedMarkdown(taskTargetLabel, allSections, allTasks, targetProjectId, scopeDescription);
+  const allAdvancedMarkdown = allAdvancedMarkdownDocument(allProjects, allSections, allTasks, inboxDescriptionQuery.data ?? "");
   const scopeJson = JSON.stringify(Object.freeze({
     schemaVersion: 1,
     exportedAt: new Date().toISOString(),
@@ -2069,6 +2108,9 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
 
   const exportMarkdown = () => {
     downloadBlob(new Blob([allMarkdown], { type: "text/markdown;charset=utf-8" }), "todoist-clone.md");
+  };
+  const exportAdvancedMarkdown = () => {
+    downloadBlob(new Blob([allAdvancedMarkdown], { type: "text/markdown;charset=utf-8" }), "todoist-clone-advanced.md");
   };
 
   return (
@@ -2139,6 +2181,14 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
                 <button type="button" className="btn-primary" onClick={exportMarkdown}><Download size={16} aria-hidden="true" />Export all markdown</button>
                 <button type="button" onClick={async () => { await copyText(allMarkdown); setCopyStatus("All markdown copied"); }}><ClipboardCopy size={16} aria-hidden="true" />Copy all markdown</button>
                 <button type="button" onClick={() => setMarkdownModal(Object.freeze({ title: "All tasks", markdown: allMarkdown, format: "markdown" }))}><Eye size={16} aria-hidden="true" />Preview all markdown</button>
+              </div>
+            </section>
+            <section className="card export-format-card" aria-labelledby="advanced-markdown-export-title">
+              <div><h2 id="advanced-markdown-export-title">Advanced markdown</h2><p>Includes task descriptions, due dates, labels, comments, and Inbox and project descriptions.</p></div>
+              <div className="export-format-actions">
+                <button type="button" className="btn-primary" onClick={exportAdvancedMarkdown}><Download size={16} aria-hidden="true" />Export all advanced markdown</button>
+                <button type="button" onClick={async () => { await copyText(allAdvancedMarkdown); setCopyStatus("All advanced markdown copied"); }}><ClipboardCopy size={16} aria-hidden="true" />Copy all advanced markdown</button>
+                <button type="button" onClick={() => setMarkdownModal(Object.freeze({ title: "All tasks", markdown: allAdvancedMarkdown, format: "advanced-markdown" }))}><Eye size={16} aria-hidden="true" />Preview all advanced markdown</button>
               </div>
             </section>
             <section className="card export-format-card" aria-labelledby="json-export-title">
@@ -2293,7 +2343,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
             className="markdown-modal"
             role="dialog"
             aria-modal="true"
-            aria-label={markdownModal.format === "json" ? "JSON preview" : "Markdown preview"}
+            aria-label={markdownModal.format === "json" ? "JSON preview" : markdownModal.format === "advanced-markdown" ? "Advanced markdown preview" : "Markdown preview"}
             onKeyDown={(event) => {
               if (event.key === "Escape") {
                 setMarkdownModal(null);
@@ -2301,7 +2351,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
             }}
           >
             <header className="markdown-modal-header">
-              <h2>{markdownModal.title} {markdownModal.format ?? "markdown"}</h2>
+              <h2>{markdownModal.title} {markdownModal.format === "advanced-markdown" ? "advanced markdown" : markdownModal.format ?? "markdown"}</h2>
               <button type="button" onClick={() => setMarkdownModal(null)}>
                 <X size={16} aria-hidden="true" />
                 Close
@@ -2323,6 +2373,13 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
                 <button type="button" onClick={async () => { await copyText(markdown); setCopyStatus("Markdown copied"); }}><ClipboardCopy size={16} aria-hidden="true" />Copy markdown</button>
               </div>
             </section>
+            <section className="card export-format-card" aria-labelledby="scope-advanced-markdown-export-title">
+              <div><h3 id="scope-advanced-markdown-export-title">Advanced markdown</h3><p>Includes descriptions, due dates, labels, and comments.</p></div>
+              <div className="export-format-actions">
+                <button type="button" onClick={() => setMarkdownModal(Object.freeze({ title: targetProjectId === null ? "Inbox" : taskTargetLabel, markdown: advancedMarkdown, format: "advanced-markdown" }))}><Eye size={16} aria-hidden="true" />Preview advanced markdown</button>
+                <button type="button" onClick={async () => { await copyText(advancedMarkdown); setCopyStatus("Advanced markdown copied"); }}><ClipboardCopy size={16} aria-hidden="true" />Copy advanced markdown</button>
+              </div>
+            </section>
             <section className="card export-format-card" aria-labelledby="scope-json-export-title">
               <div><h3 id="scope-json-export-title">JSON</h3><p>Complete structured data with tasks, sections, dates, descriptions, labels, and comments.</p></div>
               <div className="export-format-actions">
@@ -2331,7 +2388,7 @@ export const TaskApp = ({ api }: Readonly<{ api: ApplicationApi }>) => {
               </div>
             </section>
           </div>
-          {copyStatus === "Markdown copied" || copyStatus === "JSON copied" ? <p className="export-copy-status" role="status">{copyStatus}</p> : null}
+          {copyStatus.length > 0 ? <p className="export-copy-status" role="status">{copyStatus}</p> : null}
         </section>
       </div> : null}
       {addTaskOpen ? <div className="task-details-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setAddTaskOpen(false); }}>

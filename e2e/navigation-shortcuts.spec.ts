@@ -120,7 +120,7 @@ test("task dialog, inline keyboard editing, navigation, search, and calendar wor
   }, renamedSection);
   await expect.poll(() => page.locator('section[aria-label^="Section "]').evaluateAll((sections, names: Readonly<{ first: string; second: string }>) => sections.findIndex((section) => section.getAttribute("aria-label") === `Section ${names.second}`) < sections.findIndex((section) => section.getAttribute("aria-label") === `Section ${names.first}`), { first: renamedSection, second: secondSectionName })).toBe(true);
 
-  await page.keyboard.press("Control+k");
+  await page.evaluate(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "л", code: "KeyK", ctrlKey: true, bubbles: true })));
   await page.getByRole("textbox", { name: "Search or type a command" }).fill(renamedProject);
   await expect(page.locator(".search-palette .search-result").filter({ hasText: renamedProject })).toBeVisible();
   await page.keyboard.press("Escape");
