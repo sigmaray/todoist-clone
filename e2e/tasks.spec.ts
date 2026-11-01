@@ -488,7 +488,22 @@ test("opens settings with deletion confirmation enabled by default", async ({ pa
 
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
   await expect(page.getByRole("checkbox", { name: /Ask for confirmation before deleting/ })).toBeChecked();
+  await expect(page.getByRole("heading", { name: "Your account" })).toBeVisible();
+  await expect(page.getByLabel("Username")).toHaveValue("admin");
+  await expect(page.getByRole("heading", { name: "Users" })).toHaveCount(0);
   await expect(page.getByText(/Set the initial administrator password with the backend CLI/)).toHaveCount(0);
+});
+
+test("administrators manage accounts on a separate page", async ({ page }, testInfo) => {
+  const username = `managed-${testInfo.workerIndex}-${Date.now()}`;
+  await page.goto("/");
+  await page.getByRole("link", { name: "User management" }).click();
+  await expect(page).toHaveURL(/\/admin\/users$/);
+  await expect(page.getByRole("heading", { name: "User management" })).toBeVisible();
+  await page.getByLabel("Username").first().fill(username);
+  await page.getByLabel("Password", { exact: true }).fill("x");
+  await page.getByRole("button", { name: "Create user" }).click();
+  await expect(page.locator(`.managed-users input[value="${username}"]`)).toBeVisible();
 });
 
 test("adds tasks directly to sections and deletes all tasks within Inbox or a project", async ({ page }, testInfo) => {

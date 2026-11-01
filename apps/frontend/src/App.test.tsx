@@ -4,7 +4,7 @@ import { BrowserRouter } from "react-router-dom";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createQueryClient, SettingsPage, TaskApp, ToolsPage } from "./App";
+import { AdminUsersPage, createQueryClient, SettingsPage, TaskApp, ToolsPage } from "./App";
 import { createTaskApi } from "./api";
 import type { ApplicationApi, ToolsApi } from "./api";
 
@@ -59,6 +59,7 @@ const baseApi = (tasks: ReadonlyArray<TaskNode>): ApplicationApi =>
     getAuthStatus: async () => Object.freeze({ accessMode: "password" as const, authenticated: true, user: Object.freeze({ id: "admin", username: "admin", isAdmin: true }) }),
     login: async () => undefined,
     logout: async () => undefined,
+    updateOwnAccount: async (account) => Object.freeze({ id: "admin", username: account.username, isAdmin: true }),
     listUsers: async () => Object.freeze([Object.freeze({ id: "admin", username: "admin", isAdmin: true })]),
     createUser: async (user) => Object.freeze({ id: "created-user", username: user.username, isAdmin: user.isAdmin }),
     updateUser: async (id, user) => Object.freeze({ id, username: user.username ?? "admin", isAdmin: user.isAdmin ?? true }),
@@ -1344,10 +1345,25 @@ describe("SettingsPage", () => {
     expect(updateSettings.mock.calls[0]?.[0]).toEqual({ confirmDelete: false });
   });
 
-  it("lets administrators create a user", async () => {
+  it("lets a signed-in user update their own account without user administration", async () => {
+    const updateOwnAccount = vi.fn(async (account: Parameters<ApplicationApi["updateOwnAccount"]>[0]) => Object.freeze({ id: "admin", username: account.username, isAdmin: true }));
+    const api = Object.freeze({ ...baseApi(Object.freeze([])), updateOwnAccount });
+    render(<QueryClientProvider client={createQueryClient()}><BrowserRouter><SettingsPage api={api} /></BrowserRouter></QueryClientProvider>);
+
+    expect(await screen.findByRole("heading", { name: "Your account" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Users" })).not.toBeInTheDocument();
+    await userEvent.clear(screen.getByRole("textbox", { name: "Username" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Username" }), "NewAdmin");
+    await userEvent.type(screen.getByLabelText("New password"), "x");
+    await userEvent.click(screen.getByRole("button", { name: "Save account" }));
+
+    await waitFor(() => expect(updateOwnAccount.mock.calls[0]?.[0]).toEqual({ username: "newadmin", password: "x" }));
+  });
+
+  it("lets administrators create a user on the user management page", async () => {
     const createUser = vi.fn(async (user: Parameters<ApplicationApi["createUser"]>[0]) => Object.freeze({ id: "created", username: user.username, isAdmin: user.isAdmin }));
     const api = Object.freeze({ ...baseApi(Object.freeze([])), createUser });
-    render(<QueryClientProvider client={createQueryClient()}><BrowserRouter><SettingsPage api={api} /></BrowserRouter></QueryClientProvider>);
+    render(<QueryClientProvider client={createQueryClient()}><BrowserRouter><AdminUsersPage api={api} /></BrowserRouter></QueryClientProvider>);
 
     const usernames = await screen.findAllByLabelText("Username");
     await userEvent.type(usernames[0]!, "sam");

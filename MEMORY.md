@@ -1,5 +1,12 @@
 # Project Memory
 
+## 2026-11-01 — Move user CRUD to the admin page and add self-service account updates
+
+- Moved administrator user creation, editing, role changes, and deletion from `/settings` to `/admin/users`; the route and sidebar link require an administrator session.
+- Added an authenticated `PATCH /auth/account` endpoint and a Settings form for changing the current user's username and password. Usernames are normalized to lowercase and uniqueness conflicts return HTTP 409; changing a password revokes that user's sessions.
+- Added backend and frontend regression coverage plus E2E coverage for the separate admin page and account section in Settings.
+- Verification: `pnpm test` passes (86 tests), `pnpm build` and `git diff --check` pass, and full Playwright E2E passes (27 tests) on a fresh isolated database.
+
 ## 2026-11-01 — Add task selection button styling and shortcuts
 
 - Styled Select tasks with Bootstrap's outlined secondary button and a list/check icon. The S physical key toggles selection regardless of keyboard layout, ignores text inputs and modifier shortcuts, and Escape exits selection mode.

@@ -67,6 +67,7 @@ const loginSchema = z.object({
 const updateSettingsSchema = z.object({
   confirmDelete: z.boolean()
 });
+const updateAccountSchema = z.object({ username: z.string().trim().min(1).max(64).optional(), password: z.string().min(1).optional() }).refine((patch) => Object.keys(patch).length > 0);
 const createUserSchema = z.object({ username: z.string().trim().min(1).max(64), password: z.string().min(1), isAdmin: z.boolean().default(false) });
 const updateUserSchema = z.object({ username: z.string().trim().min(1).max(64).optional(), password: z.string().min(1).optional(), isAdmin: z.boolean().optional() }).refine((patch) => Object.keys(patch).length > 0);
 const inboxDescriptionSchema = z.object({ description: z.string().max(20000) });
@@ -193,6 +194,22 @@ export const createApp = (
     await userRepository.savePreferences(userId, result.data.confirmDelete);
     context.header("Cache-Control", "no-store");
     return context.json({ settings: { confirmDelete: result.data.confirmDelete, accessMode: "password", username: user.username } });
+  });
+
+  app.patch("/auth/account", async (context) => {
+    const result = updateAccountSchema.safeParse(await parseJson(context.req.raw));
+    if (!result.success) return context.json({ error: "Invalid account payload" }, 400);
+    const userId = context.get("userId");
+    try {
+      const updated = await userRepository.update(userId, {
+        ...(result.data.username === undefined ? {} : { username: result.data.username.toLowerCase() }),
+        ...(result.data.password === undefined ? {} : { passwordHash: await hashPassword(result.data.password) })
+      });
+      if (updated === null) return context.json({ error: "Username already exists" }, 409);
+      return context.json({ user: updated });
+    } catch {
+      return context.json({ error: "Username already exists" }, 409);
+    }
   });
 
   app.get("/users", async (context) => {

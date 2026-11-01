@@ -365,6 +365,33 @@ describe("settings and session authentication", () => {
     await agent.get("/tasks").expect(401);
   });
 
+  it("allows users to update their own username and password with unique usernames", async () => {
+    const passwordHash = await hashPassword("a-long-test-password");
+    const userRepository = createMemoryUserRepository([
+      Object.freeze({ id: "legacy-admin", username: "admin", passwordHash, isAdmin: true, confirmDelete: true, inboxDescription: "" }),
+      Object.freeze({ id: "other-user", username: "other", passwordHash, isAdmin: false, confirmDelete: true, inboxDescription: "" })
+    ]);
+    const server = await createTestServer(createApp(createMemoryTaskRepository(), { userRepository }));
+    const agent = request.agent(server);
+
+    await agent.patch("/auth/account").send({ username: "anonymous" }).expect(401);
+    await agent.post("/auth/login").send({ username: "admin", password: "a-long-test-password" }).expect(200);
+    await agent.patch("/auth/account").send({ username: "OTHER" }).expect(409);
+    await agent.get("/settings").expect(200).expect(({ body }) => expect(body.settings.username).toBe("admin"));
+    await agent.patch("/auth/account").send({ username: "NewAdmin" }).expect(200).expect(({ body }) => {
+      expect(body.user).toMatchObject({ id: "legacy-admin", username: "newadmin", isAdmin: true });
+    });
+
+    await agent.patch("/auth/account").send({ password: "" }).expect(400);
+    await agent.patch("/auth/account").send({ password: "x" }).expect(200);
+    await agent.get("/tasks").expect(401);
+
+    const updatedLogin = request.agent(server);
+    await updatedLogin.post("/auth/login").send({ username: "newadmin", password: "x" }).expect(200);
+    await updatedLogin.patch("/auth/account").send({}).expect(400);
+    await updatedLogin.get("/settings").expect(200).expect(({ body }) => expect(body.settings.username).toBe("newadmin"));
+  });
+
   it("allows only administrators to manage accounts and preserves an administrator", async () => {
     const passwordHash = await hashPassword("a-long-test-password");
     const userRepository = createMemoryUserRepository([Object.freeze({ id: "legacy-admin", username: "admin", passwordHash, isAdmin: true, confirmDelete: true, inboxDescription: "" })]);
